@@ -1,0 +1,59 @@
+name: Zig build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runs-on: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: master
+      
+      - name: CMake Bootstrap
+        run: |
+            export CXX=$PWD/Scripts/zigcxx.sh
+            export CC=$PWD/Scripts/zigcc.sh
+            ./bootstrap && make -j 4
+
+  zig-mingw:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [{ msystem: CLANG64, arch: x86_64, prefix: /clang64 }]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: temp
+          submodules: recursive
+          fetch-depth: 0
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: master
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: inherit
+          location: D:\
+          install: git mingw-w64-clang-${{ matrix.arch }}-cmake
+          update: true
+      
+      - name: Move Checkout
+        run: |
+          Copy-Item -Path ".\temp" -Destination "C:\_" -Recurse
+
+      - name: CMake Build - ${{ matrix.arch }}
+        shell: msys2 {0}
+        run: |
+            cd /C/_
+            cmake -B build -DCMAKE_CXX_COMPILER=$PWD/Scripts/zigcxx.cmd -DCMAKE_C_COMPILER=$PWD/Scripts/zigcc.cmd
+            cmake --build build --parallel
