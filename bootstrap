@@ -80,6 +80,7 @@ cmake_init_file=""
 cmake_bootstrap_system_libs=""
 cmake_bootstrap_qt_gui=""
 cmake_bootstrap_qt_qmake=""
+cmake_bootstrap_debugger=""
 cmake_sphinx_info=""
 cmake_sphinx_man=""
 cmake_sphinx_html=""
@@ -666,6 +667,8 @@ Configuration:
                           (for use only by package maintainers)
   --no-system-libs        use all cmake-provided third-party libraries
                           (default)
+  --system-cppdap         use system-installed cppdap library
+  --no-system-cppdap      use cmake-provided cppdap library (default)
   --system-curl           use system-installed curl library
   --no-system-curl        use cmake-provided curl library (default)
   --system-expat          use system-installed expat library
@@ -696,6 +699,9 @@ Configuration:
   --qt-gui                build the Qt-based GUI (requires Qt >= 4.2)
   --no-qt-gui             do not build the Qt-based GUI (default)
   --qt-qmake=<qmake>      use <qmake> as the qmake executable to find Qt
+
+  --debugger              enable debugger support (default if supported)
+  --no-debugger           disable debugger support
 
   --sphinx-info           build Info manual with Sphinx
   --sphinx-man            build man pages with Sphinx
@@ -950,10 +956,10 @@ while test $# != 0; do
   --init=*) cmake_init_file=`cmake_arg "$1"` ;;
   --system-libs) cmake_bootstrap_system_libs="${cmake_bootstrap_system_libs} -DCMAKE_USE_SYSTEM_LIBRARIES=1" ;;
   --no-system-libs) cmake_bootstrap_system_libs="${cmake_bootstrap_system_libs} -DCMAKE_USE_SYSTEM_LIBRARIES=0" ;;
-  --system-bzip2|--system-curl|--system-expat|--system-jsoncpp|--system-libarchive|--system-librhash|--system-zlib|--system-liblzma|--system-nghttp2|--system-zstd|--system-libuv)
+  --system-bzip2|--system-cppdap|--system-curl|--system-expat|--system-jsoncpp|--system-libarchive|--system-librhash|--system-zlib|--system-liblzma|--system-nghttp2|--system-zstd|--system-libuv)
     lib=`cmake_arg "$1" "--system-"`
     cmake_bootstrap_system_libs="${cmake_bootstrap_system_libs} -DCMAKE_USE_SYSTEM_LIBRARY_`cmake_toupper $lib`=1" ;;
-  --no-system-bzip2|--no-system-curl|--no-system-expat|--no-system-jsoncpp|--no-system-libarchive|--no-system-librhash|--no-system-zlib|--no-system-liblzma|--no-system-nghttp2|--no-system-zstd|--no-system-libuv)
+  --no-system-bzip2|--no-system-cppdap|--no-system-curl|--no-system-expat|--no-system-jsoncpp|--no-system-libarchive|--no-system-librhash|--no-system-zlib|--no-system-liblzma|--no-system-nghttp2|--no-system-zstd|--no-system-libuv)
     lib=`cmake_arg "$1" "--no-system-"`
     cmake_bootstrap_system_libs="${cmake_bootstrap_system_libs} -DCMAKE_USE_SYSTEM_LIBRARY_`cmake_toupper $lib`=0" ;;
   --bootstrap-system-libuv) bootstrap_system_libuv="1" ;;
@@ -962,6 +968,8 @@ while test $# != 0; do
   --qt-gui) cmake_bootstrap_qt_gui="1" ;;
   --no-qt-gui) cmake_bootstrap_qt_gui="0" ;;
   --qt-qmake=*) cmake_bootstrap_qt_qmake=`cmake_arg "$1"` ;;
+  --debugger) cmake_bootstrap_debugger="1" ;;
+  --no-debugger) cmake_bootstrap_debugger="0" ;;
   --sphinx-info) cmake_sphinx_info="1" ;;
   --sphinx-man) cmake_sphinx_man="1" ;;
   --sphinx-html) cmake_sphinx_html="1" ;;
@@ -1985,6 +1993,11 @@ fi
 if test "x${cmake_bootstrap_qt_qmake}" != "x"; then
   echo '
 set (QT_QMAKE_EXECUTABLE "'"${cmake_bootstrap_qt_qmake}"'" CACHE FILEPATH "Location of Qt qmake" FORCE)
+' >> "${cmake_bootstrap_dir}/InitialCacheFlags.cmake"
+fi
+if test "x${cmake_bootstrap_debugger}" != "x"; then
+  echo '
+set (CMake_ENABLE_DEBUGGER '"${cmake_bootstrap_debugger}"' CACHE BOOL "Enable CMake debugger support" FORCE)
 ' >> "${cmake_bootstrap_dir}/InitialCacheFlags.cmake"
 fi
 if test "x${cmake_sphinx_info}" != "x"; then
