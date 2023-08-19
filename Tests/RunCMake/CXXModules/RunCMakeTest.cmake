@@ -142,13 +142,22 @@ string(REPLACE "," ";" CMake_TEST_MODULE_COMPILATION "${CMake_TEST_MODULE_COMPIL
 if ("named" IN_LIST CMake_TEST_MODULE_COMPILATION)
   run_cxx_module_test(simple)
   run_cxx_module_test(library library-static -DBUILD_SHARED_LIBS=OFF)
+  run_cxx_module_test(object-library)
   run_cxx_module_test(generated)
   run_cxx_module_test(deep-chain)
   run_cxx_module_test(duplicate)
   set(RunCMake_CXXModules_NO_TEST 1)
   run_cxx_module_test(circular)
+  run_cxx_module_test(try-compile)
+  run_cxx_module_test(try-run)
   unset(RunCMake_CXXModules_NO_TEST)
+  run_cxx_module_test(same-src-name)
   run_cxx_module_test(scan_properties)
+endif ()
+
+# Tests which require compile commands support.
+if ("compile_commands" IN_LIST CMake_TEST_MODULE_COMPILATION)
+  run_cxx_module_test(export-compile-commands)
 endif ()
 
 # Tests which require collation work.

@@ -10,7 +10,6 @@
 #include <initializer_list>
 #include <iterator>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -21,6 +20,9 @@
 #include <cmext/iterator>
 
 #include "cmValue.h"
+
+template <typename T>
+class BT;
 
 /**
  * CMake lists management
@@ -322,7 +324,7 @@ public:
   // extract sublist in range [first, last)
   cmList sublist(const_iterator first, const_iterator last) const
   {
-    return cmList{ first, last };
+    return cmList{ first, last, ExpandElements::No, EmptyElements::Yes };
   }
   // Extract sublist in range [first, last)
   // Throw std::out_of_range if pos is invalid
@@ -741,9 +743,20 @@ public:
   // Throw std::out_of_range if index is invalid
   template <typename InputIterator>
   cmList& insert_items(index_type index, InputIterator first,
-                       InputIterator last)
+                       InputIterator last,
+                       ExpandElements expandElements = ExpandElements::Yes,
+                       EmptyElements emptyElements = EmptyElements::No)
   {
-    this->insert(this->begin() + this->ComputeInsertIndex(index), first, last);
+    this->insert(this->begin() + this->ComputeInsertIndex(index), first, last,
+                 expandElements, emptyElements);
+    return *this;
+  }
+  template <typename InputIterator>
+  cmList& insert_items(index_type index, InputIterator first,
+                       InputIterator last, EmptyElements emptyElements)
+  {
+    this->insert(this->begin() + this->ComputeInsertIndex(index), first, last,
+                 ExpandElements::Yes, emptyElements);
     return *this;
   }
   cmList& insert_items(index_type index,
@@ -936,7 +949,10 @@ public:
                     std::vector<std::string> const& args,
                     std::unique_ptr<TransformSelector> = {});
 
-  std::string join(cm::string_view glue) const;
+  std::string join(cm::string_view glue) const
+  {
+    return cmList::Join(this->Values, glue);
+  }
 
   void swap(cmList& other) noexcept { this->Values.swap(other.Values); }
 
@@ -1080,6 +1096,7 @@ public:
   // but without any intermediate expansion. So the operation is simply a
   // string concatenation with special handling for the CMake list item
   // separator
+  static std::string& append(std::string& list, std::string&& value);
   static std::string& append(std::string& list, cm::string_view value);
   template <typename InputIterator>
   static std::string& append(std::string& list, InputIterator first,
@@ -1089,15 +1106,11 @@ public:
       return list;
     }
 
-    return cmList::append(list,
-                          cm::string_view{ std::accumulate(
-                            std::next(first), last, *first,
-                            [](std::string a, const std::string& b) {
-                              return std::move(a) +
-                                std::string(cmList::element_separator) + b;
-                            }) });
+    return cmList::append(
+      list, cmList::Join(first, last, cmList::element_separator));
   }
 
+  static std::string& prepend(std::string& list, std::string&& value);
   static std::string& prepend(std::string& list, cm::string_view value);
   template <typename InputIterator>
   static std::string& prepend(std::string& list, InputIterator first,
@@ -1107,13 +1120,15 @@ public:
       return list;
     }
 
-    return cmList::prepend(list,
-                           cm::string_view{ std::accumulate(
-                             std::next(first), last, *first,
-                             [](std::string a, const std::string& b) {
-                               return std::move(a) +
-                                 std::string(cmList::element_separator) + b;
-                             }) });
+    return cmList::prepend(
+      list, cmList::Join(first, last, cmList::element_separator));
+  }
+
+  template <typename Range,
+            cm::enable_if_t<cm::is_range<Range>::value, int> = 0>
+  static std::string to_string(Range const& r)
+  {
+    return cmList::Join(r, cmList::element_separator);
   }
 
   // Non-members
@@ -1183,6 +1198,38 @@ private:
     }
 
     return container.begin() + delta;
+  }
+
+  static std::string const& ToString(std::string const& s) { return s; }
+  static std::string ToString(cm::string_view s) { return std::string{ s }; }
+  static std::string const& ToString(BT<std::string> const&);
+
+  template <typename Range>
+  static std::string Join(Range const& r, cm::string_view glue)
+  {
+    if (cm::size(r) == 0) {
+      return std::string{};
+    }
+
+    return cmList::Join(std::begin(r), std::end(r), glue);
+  }
+  template <typename InputIterator>
+  static std::string Join(InputIterator first, InputIterator last,
+                          cm::string_view glue)
+  {
+    if (first == last) {
+      return std::string{};
+    }
+
+    const auto sep = std::string{ glue };
+
+    std::string joined = cmList::ToString(*first);
+    for (auto it = std::next(first); it != last; ++it) {
+      joined += sep;
+      joined += cmList::ToString(*it);
+    }
+
+    return joined;
   }
 
   container_type Values;

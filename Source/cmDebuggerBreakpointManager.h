@@ -4,6 +4,7 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -13,11 +14,9 @@
 
 #include <cm3p/cppdap/protocol.h>
 
-class cmListFileFunction;
+#include "cmDebuggerSourceBreakpoint.h"
 
-namespace cmDebugger {
-class cmDebuggerSourceBreakpoint;
-}
+class cmListFileFunction;
 
 namespace dap {
 class Session;
@@ -55,6 +54,7 @@ public:
                         std::vector<cmListFileFunction> const& functions);
   std::vector<int64_t> GetBreakpoints(std::string const& sourcePath,
                                       int64_t line);
+  size_t GetBreakpointCount() const;
   void ClearAll();
 };
 

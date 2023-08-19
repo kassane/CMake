@@ -383,7 +383,7 @@ void cmExportFileGenerator::PopulateIncludeDirectoriesInterface(
   cmGeneratorExpression ge(*target->Makefile->GetCMakeInstance());
 
   std::string dirs = cmGeneratorExpression::Preprocess(
-    cmJoin(target->Target->GetInstallIncludeDirectoriesEntries(te), ";"),
+    cmList::to_string(target->Target->GetInstallIncludeDirectoriesEntries(te)),
     preprocessRule, true);
   this->ReplaceInstallPrefix(dirs);
   std::unique_ptr<cmCompiledGeneratorExpression> cge = ge.Parse(dirs);
@@ -536,7 +536,7 @@ static void getCompatibleInterfaceProperties(
   const cmComputeLinkInformation::ItemVector& deps = info->GetItems();
 
   for (auto const& dep : deps) {
-    if (!dep.Target) {
+    if (!dep.Target || dep.Target->GetType() == cmStateEnums::OBJECT_LIBRARY) {
       continue;
     }
     getPropertyContents(dep.Target, "COMPATIBLE_INTERFACE_BOOL",

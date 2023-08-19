@@ -13,6 +13,7 @@
 #include <iterator>
 #include <queue>
 #include <sstream>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -190,7 +191,7 @@ public:
     }
 
     static std::string filesStr;
-    filesStr = cmJoin(files, ";");
+    filesStr = cmList::to_string(files);
     return filesStr;
   }
 
@@ -322,8 +323,7 @@ cmValue cmGeneratorTarget::GetSourcesProperty() const
     values.push_back(se->GetInput());
   }
   static std::string value;
-  value.clear();
-  value = cmJoin(values, ";");
+  value = cmList::to_string(values);
   return cmValue(value);
 }
 
@@ -1224,6 +1224,11 @@ bool cmGeneratorTarget::IsNormal() const
   return this->Target->IsNormal();
 }
 
+bool cmGeneratorTarget::IsRuntimeBinary() const
+{
+  return this->Target->IsRuntimeBinary();
+}
+
 bool cmGeneratorTarget::IsSynthetic() const
 {
   return this->Target->IsSynthetic();
@@ -1493,9 +1498,9 @@ std::string AddLangSpecificInterfaceIncludeDirectories(
   }
 
   std::string directories;
-  if (const auto* interface = target->GetLinkInterfaceLibraries(
+  if (const auto* link_interface = target->GetLinkInterfaceLibraries(
         config, root, LinkInterfaceFor::Usage)) {
-    for (const cmLinkItem& library : interface->Libraries) {
+    for (const cmLinkItem& library : link_interface->Libraries) {
       if (const cmGeneratorTarget* dependency = library.Target) {
         if (cm::contains(dependency->GetAllConfigCompileLanguages(), lang)) {
           auto* lg = dependency->GetLocalGenerator();
@@ -3828,7 +3833,8 @@ std::vector<BT<std::string>> cmGeneratorTarget::GetIncludeDirectories(
         if (lib.Target == nullptr) {
           libDir = cmSystemTools::CollapseFullPath(
             lib.AsStr(), this->Makefile->GetHomeOutputDirectory());
-        } else if (lib.Target->Target->IsFrameworkOnApple()) {
+        } else if (lib.Target->Target->IsFrameworkOnApple() ||
+                   this->IsImportedFrameworkFolderOnApple(config)) {
           libDir = lib.Target->GetLocation(config);
         } else {
           continue;
@@ -5857,7 +5863,7 @@ void cmGeneratorTarget::CheckPropertyCompatibility(
   static const std::string strNumMax = "COMPATIBLE_INTERFACE_NUMBER_MAX";
 
   for (auto const& dep : deps) {
-    if (!dep.Target) {
+    if (!dep.Target || dep.Target->GetType() == cmStateEnums::OBJECT_LIBRARY) {
       continue;
     }
 
@@ -8572,6 +8578,16 @@ bool cmGeneratorTarget::IsFrameworkOnApple() const
   return this->Target->IsFrameworkOnApple();
 }
 
+bool cmGeneratorTarget::IsImportedFrameworkFolderOnApple(
+  const std::string& config) const
+{
+  return this->IsApple() && this->IsImported() &&
+    (this->GetType() == cmStateEnums::STATIC_LIBRARY ||
+     this->GetType() == cmStateEnums::SHARED_LIBRARY ||
+     this->GetType() == cmStateEnums::UNKNOWN_LIBRARY) &&
+    cmSystemTools::IsPathToFramework(this->GetLocation(config));
+}
+
 bool cmGeneratorTarget::IsAppBundleOnApple() const
 {
   return this->Target->IsAppBundleOnApple();
@@ -8862,6 +8878,47 @@ std::string cmGeneratorTarget::GenerateHeaderSetVerificationFile(
   fout.close();
 
   return filename;
+}
+
+std::string cmGeneratorTarget::GetImportedXcFrameworkPath(
+  const std::string& config) const
+{
+  if (!(this->IsApple() && this->IsImported() &&
+        (this->GetType() == cmStateEnums::SHARED_LIBRARY ||
+         this->GetType() == cmStateEnums::STATIC_LIBRARY ||
+         this->GetType() == cmStateEnums::UNKNOWN_LIBRARY))) {
+    return {};
+  }
+
+  std::string desiredConfig = config;
+  if (config.empty()) {
+    desiredConfig = "NOCONFIG";
+  }
+
+  std::string result;
+
+  cmValue loc = nullptr;
+  cmValue imp = nullptr;
+  std::string suffix;
+
+  if (this->Target->GetMappedConfig(desiredConfig, loc, imp, suffix)) {
+    if (loc) {
+      result = *loc;
+    } else {
+      std::string impProp = cmStrCat("IMPORTED_LOCATION", suffix);
+      if (cmValue configLocation = this->GetProperty(impProp)) {
+        result = *configLocation;
+      } else if (cmValue location = this->GetProperty("IMPORTED_LOCATION")) {
+        result = *location;
+      }
+    }
+
+    if (cmSystemTools::IsPathToXcFramework(result)) {
+      return result;
+    }
+  }
+
+  return {};
 }
 
 bool cmGeneratorTarget::HaveFortranSources(std::string const& config) const

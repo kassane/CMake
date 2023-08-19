@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
-#include <map>
 #include <set>
 #include <sstream>
 #include <unordered_set>
@@ -952,8 +951,6 @@ void cmNinjaNormalTargetGenerator::WriteNvidiaDeviceLinkStatement(
 
   this->addPoolNinjaVariable("JOB_POOL_LINK", genTarget, vars);
 
-  vars["LINK_FLAGS"] = globalGen->EncodeLiteral(vars["LINK_FLAGS"]);
-
   vars["MANIFESTS"] = this->GetManifests(config);
 
   vars["LINK_PATH"] = frameworkPath + linkPath;
@@ -1271,8 +1268,6 @@ void cmNinjaNormalTargetGenerator::WriteLinkStatement(
     vars["LINK_FLAGS"], this->GetGeneratorTarget(),
     this->TargetLinkLanguage(config));
 
-  vars["LINK_FLAGS"] = globalGen->EncodeLiteral(vars["LINK_FLAGS"]);
-
   vars["MANIFESTS"] = this->GetManifests(config);
   vars["AIX_EXPORTS"] = this->GetAIXExports(config);
 
@@ -1474,9 +1469,11 @@ void cmNinjaNormalTargetGenerator::WriteLinkStatement(
     gt, linkBuild.OrderOnlyDeps, config, fileConfig, DependOnTargetArtifact);
 
   // Add order-only dependencies on versioning symlinks of shared libs we link.
-  if (!this->GeneratorTarget->IsDLLPlatform()) {
-    if (cmComputeLinkInformation* cli =
-          this->GeneratorTarget->GetLinkInformation(config)) {
+  // If our target is not producing a runtime binary, it doesn't need the
+  // symlinks (anything that links to the target might, but that consumer will
+  // get its own order-only dependency).
+  if (!gt->IsDLLPlatform() && gt->IsRuntimeBinary()) {
+    if (cmComputeLinkInformation* cli = gt->GetLinkInformation(config)) {
       for (auto const& item : cli->GetItems()) {
         if (item.Target &&
             item.Target->GetType() == cmStateEnums::SHARED_LIBRARY &&

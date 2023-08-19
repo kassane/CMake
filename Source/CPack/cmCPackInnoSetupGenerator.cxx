@@ -106,7 +106,7 @@ int cmCPackInnoSetupGenerator::PackageFiles()
     const cmList extraScripts(GetOption("CPACK_INNOSETUP_EXTRA_SCRIPTS"));
 
     for (const std::string& i : extraScripts) {
-      includeDirectives.push_back(cmStrCat(
+      includeDirectives.emplace_back(cmStrCat(
         "#include ", QuotePath(cmSystemTools::CollapseFullPath(i, toplevel))));
     }
   }
@@ -142,7 +142,7 @@ int cmCPackInnoSetupGenerator::PackageFiles()
     const cmList codeFiles(GetOption("CPACK_INNOSETUP_CODE_FILES"));
 
     for (const std::string& i : codeFiles) {
-      codeIncludes.push_back(cmStrCat(
+      codeIncludes.emplace_back(cmStrCat(
         "#include ", QuotePath(cmSystemTools::CollapseFullPath(i, toplevel))));
     }
   }
@@ -583,10 +583,8 @@ bool cmCPackInnoSetupGenerator::ProcessComponents()
                          "this script uses components }");
 
   // Installation types
-  bool noTypes = true;
   std::vector<cmCPackInstallationType*> types(InstallationTypes.size());
   for (auto& i : InstallationTypes) {
-    noTypes = false;
     types[i.second.Index - 1] = &i.second;
   }
 
@@ -601,17 +599,16 @@ bool cmCPackInnoSetupGenerator::ProcessComponents()
     typeInstructions.push_back(ISKeyValueLine(params));
   }
 
-  if (!noTypes) {
-    // Inno Setup requires the "custom" type
-    cmCPackInnoSetupKeyValuePairs params;
+  // Inno Setup requires the additional "custom" type
+  cmCPackInnoSetupKeyValuePairs customTypeParams;
 
-    params["Name"] = "\"custom\"";
-    params["Description"] = "\"{code:CPackGetCustomInstallationMessage}\"";
-    params["Flags"] = "iscustom";
+  customTypeParams["Name"] = "\"custom\"";
+  customTypeParams["Description"] =
+    "\"{code:CPackGetCustomInstallationMessage}\"";
+  customTypeParams["Flags"] = "iscustom";
 
-    allTypes.push_back("custom");
-    typeInstructions.push_back(ISKeyValueLine(params));
-  }
+  allTypes.push_back("custom");
+  typeInstructions.push_back(ISKeyValueLine(customTypeParams));
 
   // Components
   std::vector<cmCPackComponent*> downloadedComponents;
@@ -784,7 +781,7 @@ bool cmCPackInnoSetupGenerator::ConfigureISScript()
   // Create internal variables
   std::vector<std::string> setupSection;
   for (const auto& i : setupDirectives) {
-    setupSection.push_back(cmStrCat(i.first, '=', TranslateBool(i.second)));
+    setupSection.emplace_back(cmStrCat(i.first, '=', TranslateBool(i.second)));
   }
 
   // Also create comments if the sections are empty
@@ -1085,7 +1082,7 @@ std::string cmCPackInnoSetupGenerator::ISKeyValueLine(
   std::vector<std::string> keys;
   for (const char* i : availableKeys) {
     if (params.count(i)) {
-      keys.push_back(cmStrCat(i, ": ", params.at(i)));
+      keys.emplace_back(cmStrCat(i, ": ", params.at(i)));
     }
   }
 

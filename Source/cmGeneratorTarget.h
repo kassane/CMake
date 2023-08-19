@@ -17,6 +17,7 @@
 #include <cm/optional>
 
 #include "cmAlgorithms.h"
+#include "cmComputeLinkInformation.h"
 #include "cmLinkItem.h"
 #include "cmListFileCache.h"
 #include "cmPolicies.h"
@@ -24,7 +25,6 @@
 #include "cmValue.h"
 
 enum class cmBuildStep;
-class cmComputeLinkInformation;
 class cmCustomCommand;
 class cmFileSet;
 class cmGlobalGenerator;
@@ -51,6 +51,7 @@ public:
 
   bool IsInBuildSystem() const;
   bool IsNormal() const;
+  bool IsRuntimeBinary() const;
   bool IsSynthetic() const;
   bool IsImported() const;
   bool IsImportedGloballyVisible() const;
@@ -812,6 +813,10 @@ public:
       Apple.  */
   bool IsFrameworkOnApple() const;
 
+  /** Return whether this target is an IMPORTED library target on Apple
+      with a .framework folder as its location.  */
+  bool IsImportedFrameworkFolderOnApple(const std::string& config) const;
+
   /** Return whether this target is an executable Bundle on Apple.  */
   bool IsAppBundleOnApple() const;
 
@@ -921,6 +926,8 @@ public:
   std::string GenerateHeaderSetVerificationFile(
     cmSourceFile& source, const std::string& dir,
     cm::optional<std::set<std::string>>& languages) const;
+
+  std::string GetImportedXcFrameworkPath(const std::string& config) const;
 
 private:
   void AddSourceCommon(const std::string& src, bool before = false);
@@ -1072,6 +1079,7 @@ private:
     std::string SharedDeps;
   };
 
+  friend cmComputeLinkInformation;
   using ImportInfoMapType = std::map<std::string, ImportInfo>;
   mutable ImportInfoMapType ImportInfoMap;
   void ComputeImportInfo(std::string const& desired_config,

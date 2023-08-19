@@ -13,6 +13,7 @@
 
 #include "cmCommandLineArgument.h"
 #include "cmConsoleBuf.h"
+#include "cmCryptoHash.h"
 #include "cmDuration.h"
 #include "cmGlobalGenerator.h"
 #include "cmList.h"
@@ -28,6 +29,7 @@
 #include "cmSystemTools.h"
 #include "cmTransformDepfile.h"
 #include "cmUVProcessChain.h"
+#include "cmUVStream.h"
 #include "cmUtils.hxx"
 #include "cmValue.h"
 #include "cmVersion.h"
@@ -1691,11 +1693,8 @@ int cmcmd::HashSumFile(std::vector<std::string> const& args,
       std::cerr << "Error: " << filename << " is a directory" << std::endl;
       retval++;
     } else {
-      std::string value
-#ifndef CMAKE_BOOTSTRAP
-        = cmSystemTools::ComputeFileHash(filename, algo)
-#endif
-        ;
+      cmCryptoHash hasher(algo);
+      std::string value = hasher.HashFile(filename);
       if (value.empty()) {
         // To mimic "md5sum/shasum" behavior in a shell:
         std::cerr << filename << ": No such file or directory" << std::endl;
@@ -2017,10 +2016,8 @@ int cmcmd::RunPreprocessor(const std::vector<std::string>& command,
     return 1;
   }
   if (process.GetStatus(0).ExitStatus != 0) {
-    auto* errorStream = process.ErrorStream();
-    if (errorStream) {
-      std::cerr << errorStream->rdbuf();
-    }
+    cmUVPipeIStream errorStream(process.GetLoop(), process.ErrorStream());
+    std::cerr << errorStream.rdbuf();
 
     return 1;
   }
@@ -2144,10 +2141,8 @@ int cmcmd::RunLLVMRC(std::vector<std::string> const& args)
     return result;
   }
   if (process.GetStatus(0).ExitStatus != 0) {
-    auto* errorStream = process.ErrorStream();
-    if (errorStream) {
-      std::cerr << errorStream->rdbuf();
-    }
+    cmUVPipeIStream errorStream(process.GetLoop(), process.ErrorStream());
+    std::cerr << errorStream.rdbuf();
     return 1;
   }
 
@@ -2500,6 +2495,26 @@ int cmVSLink::LinkIncremental()
 
 int cmVSLink::LinkNonIncremental()
 {
+  // The MSVC link tool expects 'rc' to be in the PATH if it needs to embed
+  // manifests, but the user might explicitly set 'CMAKE_RC_COMPILER' instead.
+  // Add its location as a fallback at the end of PATH.
+  if (cmSystemTools::FileIsFullPath(this->RcPath)) {
+    std::string rcDir = cmSystemTools::GetFilenamePath(this->RcPath);
+#ifdef _WIN32
+    std::replace(rcDir.begin(), rcDir.end(), '/', '\\');
+    char const pathSep = ';';
+#else
+    char const pathSep = ':';
+#endif
+    cm::optional<std::string> path = cmSystemTools::GetEnvVar("PATH");
+    if (path) {
+      path = cmStrCat(*path, pathSep, rcDir);
+    } else {
+      path = rcDir;
+    }
+    cmSystemTools::PutEnv(cmStrCat("PATH=", *path));
+  }
+
   // Sort out any manifests.
   if (this->LinkGeneratesManifest || !this->UserManifests.empty()) {
     std::string opt =
@@ -2524,14 +2539,17 @@ int cmVSLink::RunMT(std::string const& out, bool notify)
   std::vector<std::string> mtCommand;
   mtCommand.push_back(this->MtPath.empty() ? "mt" : this->MtPath);
   mtCommand.emplace_back("/nologo");
-  mtCommand.emplace_back("/manifest");
 
   // add the linker generated manifest if the file exists.
   if (this->LinkGeneratesManifest &&
       cmSystemTools::FileExists(this->LinkerManifestFile)) {
+    mtCommand.emplace_back("/manifest");
     mtCommand.push_back(this->LinkerManifestFile);
   }
-  cm::append(mtCommand, this->UserManifests);
+  for (auto const& m : this->UserManifests) {
+    mtCommand.emplace_back("/manifest");
+    mtCommand.push_back(m);
+  }
   mtCommand.push_back(out);
   if (notify) {
     // Add an undocumented option that enables a special return

@@ -1,14 +1,11 @@
 /* Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
    file Copyright.txt or https://cmake.org/licensing for details.  */
-#include "cmConfigure.h"
-
 #include "cmUVProcessChain.h"
 
 #include <array>
 #include <csignal>
 #include <cstdio>
 #include <istream> // IWYU pragma: keep
-#include <type_traits>
 #include <utility>
 
 #include <cm/memory>
@@ -17,34 +14,13 @@
 
 #include "cmGetPipes.h"
 #include "cmUVHandlePtr.h"
-#include "cmUVStreambuf.h"
 
 struct cmUVProcessChain::InternalData
 {
-  struct BasicStreamData
+  struct StreamData
   {
-    cmUVStreambuf Streambuf;
-    cm::uv_pipe_ptr BuiltinStream;
+    int BuiltinStream = -1;
     uv_stdio_container_t Stdio;
-  };
-
-  template <typename IOStream>
-  struct StreamData : public BasicStreamData
-  {
-    StreamData()
-      : BuiltinIOStream(&this->Streambuf)
-    {
-    }
-
-    IOStream BuiltinIOStream;
-
-    IOStream* GetBuiltinStream()
-    {
-      if (this->BuiltinStream.get()) {
-        return &this->BuiltinIOStream;
-      }
-      return nullptr;
-    }
   };
 
   struct ProcessData
@@ -64,9 +40,9 @@ struct cmUVProcessChain::InternalData
 
   cm::uv_loop_ptr Loop;
 
-  StreamData<std::ostream> InputStreamData;
-  StreamData<std::istream> OutputStreamData;
-  StreamData<std::istream> ErrorStreamData;
+  StreamData InputStreamData;
+  StreamData OutputStreamData;
+  StreamData ErrorStreamData;
   cm::uv_pipe_ptr TempOutputPipe;
   cm::uv_pipe_ptr TempErrorPipe;
 
@@ -215,12 +191,7 @@ bool cmUVProcessChain::InternalData::Prepare(
         return false;
       }
 
-      if (errorData.BuiltinStream.init(*this->Loop, 0) < 0) {
-        return false;
-      }
-      if (uv_pipe_open(errorData.BuiltinStream, pipeFd[0]) < 0) {
-        return false;
-      }
+      errorData.BuiltinStream = pipeFd[0];
       errorData.Stdio.flags = UV_INHERIT_FD;
       errorData.Stdio.data.fd = pipeFd[1];
 
@@ -231,7 +202,6 @@ bool cmUVProcessChain::InternalData::Prepare(
         return false;
       }
 
-      errorData.Streambuf.open(errorData.BuiltinStream);
       break;
     }
 
@@ -251,6 +221,7 @@ bool cmUVProcessChain::InternalData::Prepare(
 
     case cmUVProcessChainBuilder::Builtin:
       if (this->Builder->MergedBuiltinStreams) {
+        outputData.BuiltinStream = errorData.BuiltinStream;
         outputData.Stdio.flags = UV_INHERIT_FD;
         outputData.Stdio.data.fd = errorData.Stdio.data.fd;
       } else {
@@ -259,12 +230,7 @@ bool cmUVProcessChain::InternalData::Prepare(
           return false;
         }
 
-        if (outputData.BuiltinStream.init(*this->Loop, 0) < 0) {
-          return false;
-        }
-        if (uv_pipe_open(outputData.BuiltinStream, pipeFd[0]) < 0) {
-          return false;
-        }
+        outputData.BuiltinStream = pipeFd[0];
         outputData.Stdio.flags = UV_INHERIT_FD;
         outputData.Stdio.data.fd = pipeFd[1];
 
@@ -274,8 +240,6 @@ bool cmUVProcessChain::InternalData::Prepare(
         if (uv_pipe_open(this->TempOutputPipe, outputData.Stdio.data.fd) < 0) {
           return false;
         }
-
-        outputData.Streambuf.open(outputData.BuiltinStream);
       }
       break;
 
@@ -411,17 +375,14 @@ uv_loop_t& cmUVProcessChain::GetLoop()
   return *this->Data->Loop;
 }
 
-std::istream* cmUVProcessChain::OutputStream()
+int cmUVProcessChain::OutputStream()
 {
-  if (this->Data->Builder->MergedBuiltinStreams) {
-    return this->Data->ErrorStreamData.GetBuiltinStream();
-  }
-  return this->Data->OutputStreamData.GetBuiltinStream();
+  return this->Data->OutputStreamData.BuiltinStream;
 }
 
-std::istream* cmUVProcessChain::ErrorStream()
+int cmUVProcessChain::ErrorStream()
 {
-  return this->Data->ErrorStreamData.GetBuiltinStream();
+  return this->Data->ErrorStreamData.BuiltinStream;
 }
 
 bool cmUVProcessChain::Valid() const
@@ -429,12 +390,12 @@ bool cmUVProcessChain::Valid() const
   return this->Data->Valid;
 }
 
-bool cmUVProcessChain::Wait(int64_t milliseconds)
+bool cmUVProcessChain::Wait(uint64_t milliseconds)
 {
   bool timeout = false;
   cm::uv_timer_ptr timer;
 
-  if (milliseconds >= 0) {
+  if (milliseconds > 0) {
     timer.init(*this->Data->Loop, &timeout);
     timer.start(
       [](uv_timer_t* handle) {

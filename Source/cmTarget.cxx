@@ -40,6 +40,7 @@
 #include "cmSystemTools.h"
 #include "cmTargetPropertyComputer.h"
 #include "cmValue.h"
+#include "cmXcFramework.h"
 #include "cmake.h"
 
 template <>
@@ -420,7 +421,7 @@ TargetProperty const StaticTargetProperties[] = {
   { "Fortran_FORMAT"_s, IC::CanCompileSources },
   { "Fortran_MODULE_DIRECTORY"_s, IC::CanCompileSources },
   { "Fortran_COMPILER_LAUNCHER"_s, IC::CanCompileSources },
-  { "Fortran_PREPRPOCESS"_s, IC::CanCompileSources },
+  { "Fortran_PREPROCESS"_s, IC::CanCompileSources },
   { "Fortran_VISIBILITY_PRESET"_s, IC::CanCompileSources },
   // ---- HIP
   COMMON_LANGUAGE_PROPERTIES(HIP),
@@ -811,12 +812,12 @@ std::pair<bool, cmValue> FileSetType::ReadProperties(
     did_read = true;
   } else if (prop == this->SelfEntries.PropertyName) {
     static std::string output;
-    output = cmJoin(this->SelfEntries.Entries, ";"_s);
+    output = cmList::to_string(this->SelfEntries.Entries);
     value = cmValue(output);
     did_read = true;
   } else if (prop == this->InterfaceEntries.PropertyName) {
     static std::string output;
-    output = cmJoin(this->InterfaceEntries.Entries, ";"_s);
+    output = cmList::to_string(this->InterfaceEntries.Entries);
     value = cmValue(output);
     did_read = true;
   } else if (cmHasPrefix(prop, this->DirectoryPrefix)) {
@@ -899,7 +900,7 @@ std::pair<bool, cmValue> UsageRequirementProperty::Read(
     if (!this->Entries.empty()) {
       // Storage to back the returned `cmValue`.
       static std::string output;
-      output = cmJoin(this->Entries, ";");
+      output = cmList::to_string(this->Entries);
       value = cmValue(output);
     }
     did_read = true;
@@ -2130,7 +2131,7 @@ cmValue cmTargetInternals::GetFileSetDirectories(
     return nullptr;
   }
   static std::string output;
-  output = cmJoin(fileSet->GetDirectoryEntries(), ";"_s);
+  output = cmList::to_string(fileSet->GetDirectoryEntries());
   return cmValue(output);
 }
 
@@ -2150,7 +2151,7 @@ cmValue cmTargetInternals::GetFileSetPaths(cmTarget const* self,
     return nullptr;
   }
   static std::string output;
-  output = cmJoin(fileSet->GetFileEntries(), ";"_s);
+  output = cmList::to_string(fileSet->GetFileEntries());
   return cmValue(output);
 }
 
@@ -2422,6 +2423,7 @@ cmValue cmTarget::GetProperty(const std::string& prop) const
     propC_STANDARD,
     propCXX_STANDARD,
     propCUDA_STANDARD,
+    propHIP_STANDARD,
     propOBJC_STANDARD,
     propOBJCXX_STANDARD,
     propLINK_LIBRARIES,
@@ -2446,8 +2448,8 @@ cmValue cmTarget::GetProperty(const std::string& prop) const
   };
   if (specialProps.count(prop)) {
     if (prop == propC_STANDARD || prop == propCXX_STANDARD ||
-        prop == propCUDA_STANDARD || prop == propOBJC_STANDARD ||
-        prop == propOBJCXX_STANDARD) {
+        prop == propCUDA_STANDARD || prop == propHIP_STANDARD ||
+        prop == propOBJC_STANDARD || prop == propOBJCXX_STANDARD) {
       auto propertyIter = this->impl->LanguageStandardProperties.find(prop);
       if (propertyIter == this->impl->LanguageStandardProperties.end()) {
         return nullptr;
@@ -2495,7 +2497,7 @@ cmValue cmTarget::GetProperty(const std::string& prop) const
         [](const BT<std::pair<std::string, bool>>& item) -> std::string {
           return item.Value.first;
         });
-      output = cmJoin(utilities, ";");
+      output = cmList::to_string(utilities);
       return cmValue(output);
     }
     if (prop == propIMPORTED) {
@@ -2650,6 +2652,24 @@ bool cmTarget::IsPerConfig() const
   return this->impl->PerConfig;
 }
 
+bool cmTarget::IsRuntimeBinary() const
+{
+  switch (this->GetType()) {
+    case cmStateEnums::EXECUTABLE:
+    case cmStateEnums::SHARED_LIBRARY:
+    case cmStateEnums::MODULE_LIBRARY:
+      return true;
+    case cmStateEnums::OBJECT_LIBRARY:
+    case cmStateEnums::STATIC_LIBRARY:
+    case cmStateEnums::UTILITY:
+    case cmStateEnums::INTERFACE_LIBRARY:
+    case cmStateEnums::GLOBAL_TARGET:
+    case cmStateEnums::UNKNOWN_LIBRARY:
+      break;
+  }
+  return false;
+}
+
 bool cmTarget::CanCompileSources() const
 {
   if (this->IsImported()) {
@@ -2779,6 +2799,8 @@ std::string cmTarget::ImportedGetFullPath(
       case cmStateEnums::RuntimeBinaryArtifact:
         if (loc) {
           result = *loc;
+        } else if (imp) {
+          result = *imp;
         } else {
           std::string impProp = cmStrCat("IMPORTED_LOCATION", suffix);
           if (cmValue config_location = this->GetProperty(impProp)) {
@@ -2786,6 +2808,35 @@ std::string cmTarget::ImportedGetFullPath(
           } else if (cmValue location =
                        this->GetProperty("IMPORTED_LOCATION")) {
             result = *location;
+          }
+          if (result.empty() &&
+              (this->GetType() == cmStateEnums::SHARED_LIBRARY ||
+               this->IsExecutableWithExports())) {
+            impProp = cmStrCat("IMPORTED_IMPLIB", suffix);
+            if (cmValue config_implib = this->GetProperty(impProp)) {
+              result = *config_implib;
+            } else if (cmValue implib = this->GetProperty("IMPORTED_IMPLIB")) {
+              result = *implib;
+            }
+          }
+        }
+        if (this->IsApple() &&
+            (this->impl->TargetType == cmStateEnums::SHARED_LIBRARY ||
+             this->impl->TargetType == cmStateEnums::STATIC_LIBRARY ||
+             this->impl->TargetType == cmStateEnums::UNKNOWN_LIBRARY) &&
+            cmSystemTools::IsPathToXcFramework(result)) {
+          auto plist = cmParseXcFrameworkPlist(result, *this->impl->Makefile,
+                                               this->impl->Backtrace);
+          if (!plist) {
+            return "";
+          }
+          auto const* library = plist->SelectSuitableLibrary(
+            *this->impl->Makefile, this->impl->Backtrace);
+          if (library) {
+            result = cmStrCat(result, '/', library->LibraryIdentifier, '/',
+                              library->LibraryPath);
+          } else {
+            return "";
           }
         }
         break;
@@ -2812,7 +2863,10 @@ std::string cmTarget::ImportedGetFullPath(
         std::string unset;
         std::string configuration;
 
-        if (artifact == cmStateEnums::RuntimeBinaryArtifact) {
+        if (this->GetType() == cmStateEnums::SHARED_LIBRARY &&
+            artifact == cmStateEnums::RuntimeBinaryArtifact) {
+          unset = "IMPORTED_LOCATION or IMPORTED_IMPLIB";
+        } else if (artifact == cmStateEnums::RuntimeBinaryArtifact) {
           unset = "IMPORTED_LOCATION";
         } else if (artifact == cmStateEnums::ImportLibraryArtifact) {
           unset = "IMPORTED_IMPLIB";
@@ -2985,11 +3039,10 @@ bool cmTarget::GetMappedConfig(std::string const& desired_config, cmValue& loc,
   }
 
   // If we needed to find one of the mapped configurations but did not
-  // On a DLL platform there may be only IMPORTED_IMPLIB for a shared
-  // library or an executable with exports.
-  bool allowImp = (this->IsDLLPlatform() &&
-                   (this->GetType() == cmStateEnums::SHARED_LIBRARY ||
-                    this->IsExecutableWithExports())) ||
+  // There may be only IMPORTED_IMPLIB for a shared library or an executable
+  // with exports.
+  bool allowImp = (this->GetType() == cmStateEnums::SHARED_LIBRARY ||
+                   this->IsExecutableWithExports()) ||
     (this->IsAIX() && this->IsExecutableWithExports()) ||
     (this->GetMakefile()->PlatformSupportsAppleTextStubs() &&
      this->IsSharedLibraryWithExports());

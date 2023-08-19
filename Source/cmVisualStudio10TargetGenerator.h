@@ -97,6 +97,7 @@ private:
   void WriteWinRTPackageCertificateKeyFile(Elem& e0);
   void WriteXamlFilesGroup(Elem& e0);
   void WritePathAndIncrementalLinkOptions(Elem& e0);
+  void WritePublicProjectContentOptions(Elem& e0);
   void WriteItemDefinitionGroups(Elem& e0);
   void VerifyNecessaryFiles();
   void WriteMissingFiles(Elem& e1);
@@ -193,9 +194,6 @@ private:
   void WriteGroupSources(Elem& e0, std::string const& name,
                          ToolSources const& sources,
                          std::vector<cmSourceGroup>&);
-  void WriteBuildSystemSources(Elem& e0, std::string const& name,
-                               ToolSources const& sources);
-
   void AddMissingSourceGroups(std::set<cmSourceGroup const*>& groupsUsed,
                               const std::vector<cmSourceGroup>& allGroups);
   bool IsResxHeader(const std::string& headerFile);
@@ -246,7 +244,6 @@ private:
   std::set<std::string> ASanEnabledConfigurations;
   std::set<std::string> FuzzerEnabledConfigurations;
   std::map<std::string, std::string> SpectreMitigation;
-  std::set<std::string> BuildSystemSourcesFilters;
   cmGlobalVisualStudio10Generator* const GlobalGenerator;
   cmLocalVisualStudio10Generator* const LocalGenerator;
   std::set<std::string> CSharpCustomCommandNames;
