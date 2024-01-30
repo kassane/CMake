@@ -24,6 +24,7 @@
 
 class cmCustomCommand;
 class cmFileSet;
+class cmFindPackageStack;
 class cmGlobalGenerator;
 class cmInstallTargetGenerator;
 class cmMakefile;
@@ -239,6 +240,9 @@ public:
   //! Get a backtrace from the creation of the target.
   cmListFileBacktrace const& GetBacktrace() const;
 
+  //! Get a find_package call stack from the creation of the target.
+  cmFindPackageStack const& GetFindPackageStack() const;
+
   void InsertInclude(BT<std::string> const& entry, bool before = false);
   void InsertCompileOption(BT<std::string> const& entry, bool before = false);
   void InsertCompileDefinition(BT<std::string> const& entry);
@@ -291,6 +295,10 @@ public:
   cmBTStringRange GetLinkInterfaceDirectEntries() const;
   cmBTStringRange GetLinkInterfaceDirectExcludeEntries() const;
 
+  void CopyPolicyStatuses(cmTarget const* tgt);
+  void CopyImportedCxxModulesEntries(cmTarget const* tgt);
+  void CopyImportedCxxModulesProperties(cmTarget const* tgt);
+
   cmBTStringRange GetHeaderSetsEntries() const;
   cmBTStringRange GetCxxModuleSetsEntries() const;
 
@@ -316,6 +324,8 @@ public:
 
   static std::string GetFileSetsPropertyName(const std::string& type);
   static std::string GetInterfaceFileSetsPropertyName(const std::string& type);
+
+  bool HasFileSets() const;
 
 private:
   template <typename ValueType>

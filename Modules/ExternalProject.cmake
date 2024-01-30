@@ -522,7 +522,7 @@ overridden if required.
   use the same generator as the main project, but the ``CMAKE_GENERATOR``
   option can be given to override this.  The project is responsible for
   adding any toolchain details, flags or other settings it wants to
-  re-use from the main project or otherwise specify (see ``CMAKE_ARGS``,
+  reuse from the main project or otherwise specify (see ``CMAKE_ARGS``,
   ``CMAKE_CACHE_ARGS`` and ``CMAKE_CACHE_DEFAULT_ARGS`` below).
 
   For non-CMake external projects, the ``CONFIGURE_COMMAND`` option must
@@ -593,7 +593,7 @@ overridden if required.
   as initial defaults only and will not override any variables already set
   from a previous run. Use this option with care, as it can lead to
   different behavior depending on whether the build starts from a fresh
-  build directory or re-uses previous build contents.
+  build directory or reuses previous build contents.
 
   .. versionadded:: 3.15
     If the CMake generator is the ``Green Hills MULTI`` and not overridden,
@@ -1518,6 +1518,21 @@ function(_ep_write_downloadfile_script
   netrc
   netrc_file
 )
+  if("x${REMOTE}" STREQUAL "x")
+    message(FATAL_ERROR "REMOTE can't be empty")
+  endif()
+  if("x${LOCAL}" STREQUAL "x")
+    message(FATAL_ERROR "LOCAL can't be empty")
+  endif()
+
+  # REMOTE could contain special characters that parse as separate arguments.
+  # Things like parentheses are legitimate characters in a URL, but would be
+  # seen as the start of a new unquoted argument by the cmake language parser.
+  # Avoid those special cases by preparing quoted strings for direct inclusion
+  # in the foreach() call that iterates over the set of URLs in REMOTE.
+  set(REMOTE "[====[${REMOTE}]====]")
+  string(REPLACE ";" "]====] [====[" REMOTE "${REMOTE}")
+
   if(timeout)
     set(TIMEOUT_ARGS TIMEOUT ${timeout})
     set(TIMEOUT_MSG "${timeout} seconds")
@@ -1599,7 +1614,7 @@ function(_ep_write_downloadfile_script
 
   set(HTTP_HEADERS_ARGS "")
   if(NOT http_headers STREQUAL "")
-    foreach(header ${http_headers})
+    foreach(header IN LISTS http_headers)
       string(PREPEND HTTP_HEADERS_ARGS
         "HTTPHEADER \"${header}\"\n        "
       )
@@ -1724,7 +1739,7 @@ function(_ep_set_directories name)
 
   # Apply defaults and convert to absolute paths.
   set(places stamp download source binary install tmp)
-  foreach(var ${places})
+  foreach(var IN LISTS places)
     string(TOUPPER "${var}" VAR)
     get_property(${var}_dir TARGET ${name} PROPERTY _EP_${VAR}_DIR)
     if(NOT ${var}_dir)
@@ -1796,9 +1811,9 @@ endfunction()
 #
 macro(_ep_replace_location_tags target_name)
   set(vars ${ARGN})
-  foreach(var ${vars})
-    if(${var})
-      foreach(dir
+  foreach(var IN LISTS vars)
+    if(var)
+      foreach(dir IN ITEMS
         SOURCE_DIR
         SOURCE_SUBDIR
         BINARY_DIR
@@ -1828,7 +1843,7 @@ function(_ep_command_line_to_initial_cache
   if(force)
     set(forceArg "FORCE")
   endif()
-  foreach(line ${args})
+  foreach(line IN LISTS args)
     if("${line}" MATCHES "^-D(.*)")
       set(line "${CMAKE_MATCH_1}")
       if(NOT "${setArg}" STREQUAL "")
@@ -1884,7 +1899,7 @@ endfunction()
 
 
 function(ExternalProject_Get_Property name)
-  foreach(var ${ARGN})
+  foreach(var IN LISTS ARGN)
     string(TOUPPER "${var}" VAR)
     get_property(is_set TARGET ${name} PROPERTY _EP_${VAR} SET)
     if(NOT is_set)
@@ -1934,8 +1949,10 @@ function(_ep_get_build_command
   set(args)
   _ep_get_configure_command_id(${name} cfg_cmd_id)
   if(cfg_cmd_id STREQUAL "cmake")
-    # CMake project.  Select build command based on generator.
-    get_target_property(cmake_generator ${name} _EP_CMAKE_GENERATOR)
+    # Adding a CMake project as an External Project.  Select command based on generator
+    get_property(cmake_generator TARGET ${name} PROPERTY _EP_CMAKE_GENERATOR)
+    # cmake_generator is the CMake generator of the ExternalProject target being added
+    # CMAKE_GENERATOR is the CMake generator of the Current Project
     if("${CMAKE_GENERATOR}" MATCHES "Make" AND
        ("${cmake_generator}" MATCHES "Make" OR NOT cmake_generator))
       # The project uses the same Makefile generator.  Use recursive make.
@@ -1948,6 +1965,11 @@ function(_ep_get_build_command
       endif()
     else()
       # Drive the project with "cmake --build".
+      if(NOT cmake_generator)
+        # If there is no CMake Generator defined on the ExternalProject,
+        # use the same Generator as the current project
+        set(cmake_generator "${CMAKE_GENERATOR}")
+      endif()
       get_target_property(cmake_command ${name} _EP_CMAKE_COMMAND)
       if(cmake_command)
         set(cmd "${cmake_command}")
@@ -1977,7 +1999,11 @@ function(_ep_get_build_command
         list(APPEND args --config ${config})
       endif()
       if(step STREQUAL "INSTALL")
-        list(APPEND args --target install)
+        if("${cmake_generator}" MATCHES "Green Hills MULTI")
+          list(APPEND args --target INSTALL)
+        else()
+          list(APPEND args --target install)
+        endif()
       endif()
       # But for "TEST" drive the project with corresponding "ctest".
       if("x${step}x" STREQUAL "xTESTx")
@@ -2361,7 +2387,7 @@ function(ExternalProject_Add_StepTargets name)
     endif()
     message(AUTHOR_WARNING "${_cmp0114_warning}")
   endif()
-  foreach(step ${steps})
+  foreach(step IN LISTS steps)
     _ep_step_add_target("${name}" "${step}" "${no_deps}")
   endforeach()
 endfunction()
@@ -2542,7 +2568,7 @@ function(ExternalProject_Add_Step name step)
     get_property(_isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
     if(_isMultiConfig)
       _ep_get_configuration_subdir_genex(cfgdir)
-      foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
+      foreach(cfg IN LISTS CMAKE_CONFIGURATION_TYPES)
         string(REPLACE "${cfgdir}" "/${cfg}"
           stamp_file_config "${stamp_file}"
         )
@@ -2617,7 +2643,7 @@ function(ExternalProject_Add_Step name step)
       PROPERTY EP_STEP_TARGETS
     )
   endif()
-  foreach(st ${step_targets})
+  foreach(st IN LISTS step_targets)
     if("${st}" STREQUAL "${step}")
       _ep_step_add_target("${name}" "${step}" "FALSE")
       break()
@@ -2664,7 +2690,7 @@ function(ExternalProject_Add_Step name step)
         message(AUTHOR_WARNING "${_cmp0114_warning}")
       endif()
     endif()
-    foreach(st ${independent_step_targets})
+    foreach(st IN LISTS independent_step_targets)
       if("${st}" STREQUAL "${step}")
         _ep_step_add_target("${name}" "${step}" "TRUE")
         break()
@@ -2730,17 +2756,15 @@ function(ExternalProject_Add_StepDependencies name step)
   # Always add file-level dependency, but add target-level dependency
   # only if the target exists for that step.
   _ep_get_step_stampfile(${name} ${step} stamp_file)
-  foreach(dep ${dependencies})
+  foreach(dep IN LISTS dependencies)
     add_custom_command(APPEND
       OUTPUT ${stamp_file}
       DEPENDS ${dep}
     )
-    if(TARGET ${name}-${step})
-      foreach(dep ${dependencies})
-        add_dependencies(${name}-${step} ${dep})
-      endforeach()
-    endif()
   endforeach()
+  if(TARGET ${name}-${step})
+    add_dependencies(${name}-${step} ${dependencies})
+  endif()
 
 endfunction()
 
@@ -2869,7 +2893,8 @@ function(_ep_add_download_command name)
       TARGET ${name}
       PROPERTY _EP_USES_TERMINAL_DOWNLOAD
     )
-    if(uses_terminal)
+    # The --trust-server-cert option requires --non-interactive
+    if(uses_terminal AND NOT svn_trust_cert)
       set(svn_interactive_args "")
     else()
       set(svn_interactive_args "--non-interactive")
@@ -3067,7 +3092,7 @@ hash=${hash}
 
     list(LENGTH url url_list_length)
     if(NOT "${url_list_length}" STREQUAL "1")
-      foreach(entry ${url})
+      foreach(entry IN LISTS url)
         if(NOT "${entry}" MATCHES "^[a-z]+://")
           message(FATAL_ERROR
             "At least one entry of URL is a path (invalid in a list)"
@@ -3357,7 +3382,8 @@ function(_ep_add_update_command name)
     get_property(svn_password TARGET ${name} PROPERTY _EP_SVN_PASSWORD)
     get_property(svn_trust_cert TARGET ${name} PROPERTY _EP_SVN_TRUST_CERT)
     get_property(uses_terminal TARGET ${name} PROPERTY _EP_USES_TERMINAL_UPDATE)
-    if(uses_terminal)
+    # The --trust-server-cert option requires --non-interactive
+    if(uses_terminal AND NOT svn_trust_cert)
       set(svn_interactive_args "")
     else()
       set(svn_interactive_args "--non-interactive")
@@ -3761,6 +3787,9 @@ function(_ep_extract_configure_command var name)
         list(APPEND cmd "-G${CMAKE_EXTRA_GENERATOR} - ${CMAKE_GENERATOR}")
       else()
         list(APPEND cmd "-G${CMAKE_GENERATOR}")
+        # GreenHills needs to know about the compiler and toolset.
+        # Be sure to update the similar section in
+        # FetchContent.cmake:__FetchContent_directPopulate()
         if("${CMAKE_GENERATOR}" MATCHES "Green Hills MULTI")
           set(has_cmake_cache_default_args 1)
           list(APPEND cmake_cache_default_args

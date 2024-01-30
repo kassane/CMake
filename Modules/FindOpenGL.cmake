@@ -177,9 +177,24 @@ GLVND.  For non-GLVND Linux and other systems these are left undefined.
 macOS-Specific
 ^^^^^^^^^^^^^^
 
-On OSX FindOpenGL defaults to using the framework version of OpenGL. People
-will have to change the cache values of OPENGL_glu_LIBRARY and
-OPENGL_gl_LIBRARY to use OpenGL with X11 on OSX.
+On macOS this module defaults to using the macOS-native framework
+version of OpenGL.  To use the X11 version of OpenGL on macOS, one
+can disable searching of frameworks.  For example:
+
+.. code-block:: cmake
+
+  find_package(X11)
+  if(APPLE AND X11_FOUND)
+    set(CMAKE_FIND_FRAMEWORK NEVER)
+    find_package(OpenGL)
+    unset(CMAKE_FIND_FRAMEWORK)
+  else()
+    find_package(OpenGL)
+  endif()
+
+An end user building this project may need to point CMake at their
+X11 installation, e.g., with ``-DOpenGL_ROOT=/opt/X11``.
+
 #]=======================================================================]
 
 set(_OpenGL_REQUIRED_VARS OPENGL_gl_LIBRARY)
@@ -207,11 +222,14 @@ if (WIN32)
     OPENGL_glu_LIBRARY
     )
 elseif (APPLE)
-  # The OpenGL.framework provides both gl and glu
-  find_library(OPENGL_gl_LIBRARY OpenGL DOC "OpenGL library for OS X")
-  find_library(OPENGL_glu_LIBRARY OpenGL DOC
-    "GLU library for OS X (usually same as OpenGL library)")
-  find_path(OPENGL_INCLUDE_DIR OpenGL/gl.h DOC "Include for OpenGL on OS X")
+  # The OpenGL.framework provides both gl and glu in OpenGL
+  # XQuartz provides libgl and libglu
+  find_library(OPENGL_gl_LIBRARY NAMES OpenGL GL DOC
+    "OpenGL GL library")
+  find_library(OPENGL_glu_LIBRARY NAMES OpenGL GLU DOC
+    "OpenGL GLU library")
+  find_path(OPENGL_INCLUDE_DIR NAMES OpenGL/gl.h GL/gl.h DOC
+    "Include for OpenGL")
   list(APPEND _OpenGL_REQUIRED_VARS OPENGL_INCLUDE_DIR)
 
   list(APPEND _OpenGL_CACHE_VARS
@@ -655,17 +673,8 @@ if(OPENGL_FOUND)
     # A legacy GL library is available, so use it for the legacy GL target.
     if(IS_ABSOLUTE "${OPENGL_gl_LIBRARY}")
       add_library(OpenGL::GL UNKNOWN IMPORTED)
-      if(OPENGL_gl_LIBRARY MATCHES "/([^/]+)\\.framework$")
-        set(_gl_fw "${OPENGL_gl_LIBRARY}/${CMAKE_MATCH_1}")
-        if(EXISTS "${_gl_fw}.tbd")
-          string(APPEND _gl_fw ".tbd")
-        endif()
-        set_target_properties(OpenGL::GL PROPERTIES
-          IMPORTED_LOCATION "${_gl_fw}")
-      else()
-        set_target_properties(OpenGL::GL PROPERTIES
-          IMPORTED_LOCATION "${OPENGL_gl_LIBRARY}")
-      endif()
+      set_target_properties(OpenGL::GL PROPERTIES
+        IMPORTED_LOCATION "${OPENGL_gl_LIBRARY}")
     else()
       add_library(OpenGL::GL INTERFACE IMPORTED)
       set_target_properties(OpenGL::GL PROPERTIES
@@ -709,17 +718,8 @@ if(OPENGL_FOUND)
   if(OPENGL_GLU_FOUND AND NOT TARGET OpenGL::GLU)
     if(IS_ABSOLUTE "${OPENGL_glu_LIBRARY}")
       add_library(OpenGL::GLU UNKNOWN IMPORTED)
-      if(OPENGL_glu_LIBRARY MATCHES "/([^/]+)\\.framework$")
-        set(_glu_fw "${OPENGL_glu_LIBRARY}/${CMAKE_MATCH_1}")
-        if(EXISTS "${_glu_fw}.tbd")
-          string(APPEND _glu_fw ".tbd")
-        endif()
-        set_target_properties(OpenGL::GLU PROPERTIES
-          IMPORTED_LOCATION "${_glu_fw}")
-      else()
-        set_target_properties(OpenGL::GLU PROPERTIES
-          IMPORTED_LOCATION "${OPENGL_glu_LIBRARY}")
-      endif()
+      set_target_properties(OpenGL::GLU PROPERTIES
+        IMPORTED_LOCATION "${OPENGL_glu_LIBRARY}")
     else()
       add_library(OpenGL::GLU INTERFACE IMPORTED)
       set_target_properties(OpenGL::GLU PROPERTIES

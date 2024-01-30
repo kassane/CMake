@@ -171,6 +171,8 @@ add_library(
   cmCustomCommandTypes.h
   cmCxxModuleMapper.cxx
   cmCxxModuleMapper.h
+  cmCxxModuleUsageEffects.cxx
+  cmCxxModuleUsageEffects.h
   cmDefinitions.cxx
   cmDefinitions.h
   cmDependencyProvider.h
@@ -299,6 +301,8 @@ add_library(
   cmGraphAdjacencyList.h
   cmGraphVizWriter.cxx
   cmGraphVizWriter.h
+  cmImportedCxxModuleInfo.cxx
+  cmImportedCxxModuleInfo.h
   cmInstallGenerator.h
   cmInstallGenerator.cxx
   cmInstallGetRuntimeDependenciesGenerator.h
@@ -413,6 +417,7 @@ add_library(
   cmSourceFileLocationKind.h
   cmSourceGroup.cxx
   cmSourceGroup.h
+  cmStandardLevel.h
   cmStandardLevelResolver.cxx
   cmStandardLevelResolver.h
   cmState.cxx
@@ -424,6 +429,7 @@ add_library(
   cmStateTypes.h
   cmStringAlgorithms.cxx
   cmStringAlgorithms.h
+  cmSyntheticTargetCache.h
   cmSystemTools.cxx
   cmSystemTools.h
   cmTarget.cxx
@@ -444,7 +450,6 @@ add_library(
   cmUVProcessChain.h
   cmUVStream.h
   cmUVStreambuf.h
-  cmUVSignalHackRAII.h
   cmVariableWatch.cxx
   cmVariableWatch.h
   cmVersion.cxx
@@ -552,6 +557,8 @@ add_library(
   cmFindLibraryCommand.h
   cmFindPackageCommand.cxx
   cmFindPackageCommand.h
+  cmFindPackageStack.cxx
+  cmFindPackageStack.h
   cmFindPathCommand.cxx
   cmFindPathCommand.h
   cmFindProgramCommand.cxx
@@ -1083,6 +1090,9 @@ add_library(
   CTest/cmCTestHG.h
   CTest/cmCTestP4.cxx
   CTest/cmCTestP4.h
+
+  CTest/cmUVJobServerClient.cxx
+  CTest/cmUVJobServerClient.h
 
   LexerParser/cmCTestResourceGroupsLexer.cxx
   LexerParser/cmCTestResourceGroupsLexer.h
