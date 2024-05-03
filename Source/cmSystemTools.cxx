@@ -6,7 +6,8 @@
 // NOLINTNEXTLINE(bugprone-reserved-identifier)
 #  define _POSIX_C_SOURCE 200809L
 #endif
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__QNX__)
+#if defined(__FreeBSD__) || defined(__DragonFly__) || defined(__NetBSD__) ||  \
+  defined(__QNX__)
 // For isascii
 // NOLINTNEXTLINE(bugprone-reserved-identifier)
 #  define _XOPEN_SOURCE 700
@@ -3697,6 +3698,10 @@ cm::string_view cmSystemTools::GetSystemName()
 {
 #if defined(_WIN32)
   return "Windows";
+#elif defined(__MSYS__)
+  return "MSYS";
+#elif defined(__CYGWIN__)
+  return "CYGWIN";
 #elif defined(__ANDROID__)
   return "Android";
 #else
@@ -3724,15 +3729,6 @@ cm::string_view cmSystemTools::GetSystemName()
     // fix for GNU/kFreeBSD, remove the GNU/
     if (systemName.find("kFreeBSD") != cm::string_view::npos) {
       systemName = "kFreeBSD";
-    }
-
-    // fix for CYGWIN and MSYS which have windows version in them
-    if (systemName.find("CYGWIN") != cm::string_view::npos) {
-      systemName = "CYGWIN";
-    }
-
-    if (systemName.find("MSYS") != cm::string_view::npos) {
-      systemName = "MSYS";
     }
     return systemName;
   }

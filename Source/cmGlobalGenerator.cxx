@@ -28,6 +28,7 @@
 #include "cm_codecvt_Encoding.hxx"
 
 #include "cmAlgorithms.h"
+#include "cmCMakePath.h"
 #include "cmCPackPropertiesGenerator.h"
 #include "cmComputeTargetDepends.h"
 #include "cmCryptoHash.h"
@@ -223,7 +224,7 @@ std::string cmGlobalGenerator::SelectMakeProgram(
   if (cmIsOff(makeProgram)) {
     cmValue makeProgramCSTR =
       this->CMakeInstance->GetCacheDefinition("CMAKE_MAKE_PROGRAM");
-    if (cmIsOff(makeProgramCSTR)) {
+    if (makeProgramCSTR.IsOff()) {
       makeProgram = makeDefault;
     } else {
       makeProgram = *makeProgramCSTR;
@@ -270,17 +271,14 @@ void cmGlobalGenerator::ResolveLanguageCompiler(const std::string& lang,
 
   std::string changeVars;
   if (cname && !optional) {
-    std::string cnameString;
+    cmCMakePath cachedPath;
     if (!cmSystemTools::FileIsFullPath(*cname)) {
-      cnameString = cmSystemTools::FindProgram(*cname);
+      cachedPath = cmSystemTools::FindProgram(*cname);
     } else {
-      cnameString = *cname;
+      cachedPath = *cname;
     }
-    std::string pathString = path;
-    // get rid of potentially multiple slashes:
-    cmSystemTools::ConvertToUnixSlashes(cnameString);
-    cmSystemTools::ConvertToUnixSlashes(pathString);
-    if (cnameString != pathString) {
+    cmCMakePath foundPath = path;
+    if (foundPath.Normal() != cachedPath.Normal()) {
       cmValue cvars = this->GetCMakeInstance()->GetState()->GetGlobalProperty(
         "__CMAKE_DELETE_CACHE_CHANGE_VARS_");
       if (cvars) {
@@ -336,7 +334,7 @@ bool cmGlobalGenerator::CheckTargetsForMissingSources() const
   for (const auto& localGen : this->LocalGenerators) {
     for (const auto& target : localGen->GetGeneratorTargets()) {
       if (!target->CanCompileSources() ||
-          cmIsOn(target->GetProperty("ghs_integrity_app"))) {
+          target->GetProperty("ghs_integrity_app").IsOn()) {
         continue;
       }
 
@@ -408,7 +406,7 @@ bool cmGlobalGenerator::CheckTargetsForPchCompilePdb() const
   for (const auto& generator : this->LocalGenerators) {
     for (const auto& target : generator->GetGeneratorTargets()) {
       if (!target->CanCompileSources() ||
-          cmIsOn(target->GetProperty("ghs_integrity_app"))) {
+          target->GetProperty("ghs_integrity_app").IsOn()) {
         continue;
       }
 
@@ -452,13 +450,13 @@ bool cmGlobalGenerator::FindMakeProgram(cmMakefile* mf)
       "all generators must specify this->FindMakeProgramFile");
     return false;
   }
-  if (cmIsOff(mf->GetDefinition("CMAKE_MAKE_PROGRAM"))) {
+  if (mf->GetDefinition("CMAKE_MAKE_PROGRAM").IsOff()) {
     std::string setMakeProgram = mf->GetModulesFile(this->FindMakeProgramFile);
     if (!setMakeProgram.empty()) {
       mf->ReadListFile(setMakeProgram);
     }
   }
-  if (cmIsOff(mf->GetDefinition("CMAKE_MAKE_PROGRAM"))) {
+  if (mf->GetDefinition("CMAKE_MAKE_PROGRAM").IsOff()) {
     std::ostringstream err;
     err << "CMake was unable to find a build program corresponding to \""
         << this->GetName() << "\".  CMAKE_MAKE_PROGRAM is not set.  You "
@@ -1568,10 +1566,7 @@ bool cmGlobalGenerator::Compute()
   // so create the map from project name to vector of local generators
   this->FillProjectMap();
 
-  // Add automatically generated sources (e.g. unity build).
-  if (!this->AddAutomaticSources()) {
-    return false;
-  }
+  this->CreateFileGenerateOutputs();
 
   // Iterate through all targets and add verification targets for header sets
   if (!this->AddHeaderSetVerification()) {
@@ -1586,6 +1581,29 @@ bool cmGlobalGenerator::Compute()
   }
 #endif
 
+  // Perform up-front computation in order to handle errors (such as unknown
+  // features) at this point. While processing the compile features we also
+  // calculate and cache the language standard required by the compile
+  // features.
+  //
+  // Synthetic targets performed this inside of
+  // `cmLocalGenerator::DiscoverSyntheticTargets`
+  for (const auto& localGen : this->LocalGenerators) {
+    if (!localGen->ComputeTargetCompileFeatures()) {
+      return false;
+    }
+  }
+
+  // We now have all targets set up and std levels constructed. Add
+  // `__CMAKE::CXX*` targets as link dependencies to all targets which need
+  // them.
+  //
+  // Synthetic targets performed this inside of
+  // `cmLocalGenerator::DiscoverSyntheticTargets`
+  if (!this->ApplyCXXStdTargets()) {
+    return false;
+  }
+
   // Iterate through all targets and set up C++20 module targets.
   // Create target templates for each imported target with C++20 modules.
   // INTERFACE library with BMI-generating rules and a collation step?
@@ -1593,6 +1611,9 @@ bool cmGlobalGenerator::Compute()
   // Make `add_dependencies(imported_target
   // $<$<TARGET_NAME_IF_EXISTS:uses_imported>:synth1>
   // $<$<TARGET_NAME_IF_EXISTS:other_uses_imported>:synth2>)`
+  //
+  // Note that synthetic target creation performs the above marked
+  // steps on the created targets.
   if (!this->DiscoverSyntheticTargets()) {
     return false;
   }
@@ -1602,20 +1623,11 @@ bool cmGlobalGenerator::Compute()
     localGen->AddHelperCommands();
   }
 
-  // Perform up-front computation in order to handle errors (such as unknown
-  // features) at this point. While processing the compile features we also
-  // calculate and cache the language standard required by the compile
-  // features.
-  for (const auto& localGen : this->LocalGenerators) {
-    if (!localGen->ComputeTargetCompileFeatures()) {
-      return false;
-    }
-  }
-
+  // Add automatically generated sources (e.g. unity build).
   // Add unity sources after computing compile features.  Unity sources do
   // not change the set of languages or features, but we need to know them
   // to filter out sources that are scanned for C++ module dependencies.
-  if (!this->AddUnitySources()) {
+  if (!this->AddAutomaticSources()) {
     return false;
   }
 
@@ -1828,6 +1840,19 @@ void cmGlobalGenerator::ComputeTargetOrder(cmGeneratorTarget const* gt,
   entry->second = index++;
 }
 
+bool cmGlobalGenerator::ApplyCXXStdTargets()
+{
+  for (auto const& gen : this->LocalGenerators) {
+    for (auto const& tgt : gen->GetGeneratorTargets()) {
+      if (!tgt->ApplyCXXStdTargets()) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 bool cmGlobalGenerator::DiscoverSyntheticTargets()
 {
   cmSyntheticTargetCache cache;
@@ -1885,16 +1910,21 @@ bool cmGlobalGenerator::AddHeaderSetVerification()
   return true;
 }
 
-bool cmGlobalGenerator::AddAutomaticSources()
+void cmGlobalGenerator::CreateFileGenerateOutputs()
 {
   for (const auto& lg : this->LocalGenerators) {
     lg->CreateEvaluationFileOutputs();
   }
+}
+
+bool cmGlobalGenerator::AddAutomaticSources()
+{
   for (const auto& lg : this->LocalGenerators) {
     for (const auto& gt : lg->GetGeneratorTargets()) {
       if (!gt->CanCompileSources()) {
         continue;
       }
+      lg->AddUnityBuild(gt.get());
       lg->AddISPCDependencies(gt.get());
       // Targets that reuse a PCH are handled below.
       if (!gt->GetProperty("PRECOMPILE_HEADERS_REUSE_FROM")) {
@@ -1914,35 +1944,18 @@ bool cmGlobalGenerator::AddAutomaticSources()
       }
     }
   }
-  // The above transformations may have changed the classification of sources.
+  // The above transformations may have changed the classification of sources,
+  // e.g., sources that go into unity builds become SourceKindUnityBatched.
   // Clear the source list and classification cache (KindedSources) of all
   // targets so that it will be recomputed correctly by the generators later
   // now that the above transformations are done for all targets.
+  // Also clear the link interface cache to support $<TARGET_OBJECTS:objlib>
+  // in INTERFACE_LINK_LIBRARIES because the list of object files may have
+  // been changed by conversion to a unity build or addition of a PCH source.
   for (const auto& lg : this->LocalGenerators) {
     for (const auto& gt : lg->GetGeneratorTargets()) {
       gt->ClearSourcesCache();
-    }
-  }
-  return true;
-}
-
-bool cmGlobalGenerator::AddUnitySources()
-{
-  for (const auto& lg : this->LocalGenerators) {
-    for (const auto& gt : lg->GetGeneratorTargets()) {
-      if (!gt->CanCompileSources()) {
-        continue;
-      }
-      lg->AddUnityBuild(gt.get());
-    }
-  }
-  // The above transformation may have changed the classification of sources.
-  // Clear the source list and classification cache (KindedSources) of all
-  // targets so that it will be recomputed correctly by the generators later
-  // now that the above transformations are done for all targets.
-  for (const auto& lg : this->LocalGenerators) {
-    for (const auto& gt : lg->GetGeneratorTargets()) {
-      gt->ClearSourcesCache();
+      gt->ClearLinkInterfaceCache();
     }
   }
   return true;
@@ -2837,7 +2850,7 @@ void cmGlobalGenerator::AddGlobalTarget_Package(
   } else {
     cmValue noPackageAll =
       mf->GetDefinition("CMAKE_SKIP_PACKAGE_ALL_DEPENDENCY");
-    if (cmIsOff(noPackageAll)) {
+    if (noPackageAll.IsOff()) {
       gti.Depends.emplace_back(this->GetAllTargetName());
     }
   }
@@ -2905,7 +2918,7 @@ void cmGlobalGenerator::AddGlobalTarget_Test(
   // by default.  Enable it only if CMAKE_SKIP_TEST_ALL_DEPENDENCY is
   // explicitly set to OFF.
   if (cmValue noall = mf->GetDefinition("CMAKE_SKIP_TEST_ALL_DEPENDENCY")) {
-    if (cmIsOff(noall)) {
+    if (noall.IsOff()) {
       gti.Depends.emplace_back(this->GetAllTargetName());
     }
   }
@@ -3029,7 +3042,7 @@ void cmGlobalGenerator::AddGlobalTarget_Install(
       gti.Depends.emplace_back(this->GetPreinstallTargetName());
     } else {
       cmValue noall = mf->GetDefinition("CMAKE_SKIP_INSTALL_ALL_DEPENDENCY");
-      if (cmIsOff(noall)) {
+      if (noall.IsOff()) {
         gti.Depends.emplace_back(this->GetAllTargetName());
       }
     }
@@ -3111,7 +3124,7 @@ bool cmGlobalGenerator::UseFolderProperty() const
 
   // If this property is defined, let the setter turn this on or off.
   if (prop) {
-    return cmIsOn(*prop);
+    return prop.IsOn();
   }
 
   // If CMP0143 is NEW `treat` "USE_FOLDERS" as ON. Otherwise `treat` it as OFF

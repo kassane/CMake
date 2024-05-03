@@ -265,6 +265,7 @@ Additionally, the following variables are deprecated:
 
 cmake_policy(PUSH)
 cmake_policy(SET CMP0057 NEW) # if IN_LIST
+cmake_policy(SET CMP0159 NEW) # file(STRINGS) with REGEX updates CMAKE_MATCH_<n>
 
 include(${CMAKE_CURRENT_LIST_DIR}/FindPackageHandleStandardArgs.cmake)
 find_package(PkgConfig QUIET)
@@ -302,7 +303,7 @@ if(WIN32)
 
   # Intel MPI compiler names
   set(_MPI_IntelLLVM_C_COMPILER_NAMES            mpiicx.bat mpiicc.bat)
-  set(_MPI_IntelLLVM_CXX_COMPILER_NAMES          mpiicpx.bat mpiicpc.bat)
+  set(_MPI_IntelLLVM_CXX_COMPILER_NAMES          mpiicx.bat mpiicpc.bat) # Not GNU-like mpiicpx.bat
   set(_MPI_IntelLLVM_Fortran_COMPILER_NAMES      mpiifx.bat mpiifort.bat mpif77.bat mpif90.bat)
 
   # Intel MPI compiler names for MSMPI

@@ -280,13 +280,60 @@ function(CMAKE_DETERMINE_COMPILER_ID lang flagvar src)
     endif()
   elseif("x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xGNU"
     OR "x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xAppleClang"
-    OR "x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xFujitsuClang")
+    OR "x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xFujitsuClang"
+    OR "x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xTIClang")
     set(CMAKE_${lang}_COMPILER_FRONTEND_VARIANT "GNU")
   elseif("x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xMSVC")
     set(CMAKE_${lang}_COMPILER_FRONTEND_VARIANT "MSVC")
   else()
     set(CMAKE_${lang}_COMPILER_FRONTEND_VARIANT "")
   endif()
+
+  # `clang-scan-deps` needs to know the resource directory. This only matters
+  # for C++ and the GNU-frontend variant.
+  set(CMAKE_${lang}_COMPILER_CLANG_RESOURCE_DIR "")
+  if ("x${lang}" STREQUAL "xCXX" AND
+      "x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xClang" AND
+      "x${CMAKE_${lang}_COMPILER_FRONTEND_VARIANT}" STREQUAL "xGNU")
+    execute_process(
+      COMMAND "${CMAKE_${lang}_COMPILER}"
+        ${CMAKE_${lang}_COMPILER_ID_ARG1}
+        -print-resource-dir
+      OUTPUT_VARIABLE _clang_resource_dir_out
+      ERROR_VARIABLE _clang_resource_dir_err
+      RESULT_VARIABLE _clang_resource_dir_res
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_STRIP_TRAILING_WHITESPACE)
+    if (_clang_resource_dir_res EQUAL 0)
+      file(TO_CMAKE_PATH "${_clang_resource_dir_out}" _clang_resource_dir_out)
+      if(IS_DIRECTORY "${_clang_resource_dir_out}")
+        set(CMAKE_${lang}_COMPILER_CLANG_RESOURCE_DIR "${_clang_resource_dir_out}")
+      endif()
+    endif ()
+  endif ()
+
+  set(CMAKE_${lang}_STANDARD_LIBRARY "")
+  if ("x${lang}" STREQUAL "xCXX" AND
+      EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/${lang}-DetectStdlib.h" AND
+      "x${CMAKE_${lang}_COMPILER_ID}" STREQUAL "xClang" AND
+      "x${CMAKE_${lang}_COMPILER_FRONTEND_VARIANT}" STREQUAL "xGNU")
+    # See #20851 for a proper abstraction for this.
+    execute_process(
+      COMMAND "${CMAKE_${lang}_COMPILER}"
+        ${CMAKE_${lang}_COMPILER_ID_ARG1}
+        ${CMAKE_CXX_COMPILER_ID_FLAGS_LIST}
+        -E
+        -x c++-header
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/${lang}-DetectStdlib.h"
+        -o - # Write to stdout.
+      OUTPUT_VARIABLE _lang_stdlib_out
+      ERROR_VARIABLE _lang_stdlib_err
+      RESULT_VARIABLE _lang_stdlib_res
+      ERROR_STRIP_TRAILING_WHITESPACE)
+    if (_lang_stdlib_res EQUAL 0)
+      string(REGEX REPLACE ".*CMAKE-STDLIB-DETECT: (.+)\n.*" "\\1" "CMAKE_${lang}_STANDARD_LIBRARY" "${_lang_stdlib_out}")
+    endif ()
+  endif ()
 
   # Display the final identification result.
   if(CMAKE_${lang}_COMPILER_ID)
@@ -330,6 +377,8 @@ function(CMAKE_DETERMINE_COMPILER_ID lang flagvar src)
   set(CMAKE_${lang}_EXTENSIONS_COMPUTED_DEFAULT "${CMAKE_${lang}_EXTENSIONS_COMPUTED_DEFAULT}" PARENT_SCOPE)
   set(CMAKE_${lang}_COMPILER_PRODUCED_OUTPUT "${COMPILER_${lang}_PRODUCED_OUTPUT}" PARENT_SCOPE)
   set(CMAKE_${lang}_COMPILER_PRODUCED_FILES "${COMPILER_${lang}_PRODUCED_FILES}" PARENT_SCOPE)
+  set(CMAKE_${lang}_COMPILER_CLANG_RESOURCE_DIR "${CMAKE_${lang}_COMPILER_CLANG_RESOURCE_DIR}" PARENT_SCOPE)
+  set(CMAKE_${lang}_STANDARD_LIBRARY "${CMAKE_${lang}_STANDARD_LIBRARY}" PARENT_SCOPE)
 endfunction()
 
 include(CMakeCompilerIdDetection)
@@ -894,9 +943,12 @@ function(CMAKE_DETERMINE_COMPILER_ID_CHECK lang file)
     set(SIMULATE_VERSION)
     set(CMAKE_${lang}_COMPILER_ID_STRING_REGEX ".?I.?N.?F.?O.?:.?[A-Za-z0-9_]+\\[[^]]*\\]")
     foreach(encoding "" "ENCODING;UTF-16LE" "ENCODING;UTF-16BE")
+      cmake_policy(PUSH)
+      cmake_policy(SET CMP0159 NEW) # file(STRINGS) with REGEX updates CMAKE_MATCH_<n>
       file(STRINGS "${file}" CMAKE_${lang}_COMPILER_ID_STRINGS
         LIMIT_COUNT 38 ${encoding}
         REGEX "${CMAKE_${lang}_COMPILER_ID_STRING_REGEX}")
+      cmake_policy(POP)
       if(NOT CMAKE_${lang}_COMPILER_ID_STRINGS STREQUAL "")
         break()
       endif()
@@ -1182,7 +1234,7 @@ function(CMAKE_DETERMINE_MSVC_SHOWINCLUDES_PREFIX lang userflags)
     ENCODING AUTO # cl prints in console output code page
     )
   string(REPLACE "\n" "\n  " msg "  ${out}")
-  if(res EQUAL 0 AND "${out}" MATCHES "(^|\n)([^:\n][^:\n]+:[^:\n]*[^: \n][^: \n]:?[ \t]+)([A-Za-z]:\\\\|\\./|/)")
+  if(res EQUAL 0 AND "${out}" MATCHES "(^|\n)([^:\n][^:\n]+:[^:\n]*[^: \n][^: \n]:?[ \t]+)([A-Za-z]:\\\\|\\./|\\.\\\\|/)")
     set(CMAKE_${lang}_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_2}" PARENT_SCOPE)
     string(APPEND msg "\nFound prefix \"${CMAKE_MATCH_2}\"")
   else()

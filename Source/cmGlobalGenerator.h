@@ -674,12 +674,13 @@ protected:
 
   virtual bool CheckALLOW_DUPLICATE_CUSTOM_TARGETS() const;
 
+  bool ApplyCXXStdTargets();
   bool DiscoverSyntheticTargets();
 
   bool AddHeaderSetVerification();
 
+  void CreateFileGenerateOutputs();
   bool AddAutomaticSources();
-  bool AddUnitySources();
 
   std::string SelectMakeProgram(const std::string& makeProgram,
                                 const std::string& makeDefault = "") const;

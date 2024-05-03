@@ -299,24 +299,19 @@ if(BUILD_TESTING)
     "Should the tests that use '--build-target package' be run?"
     ON)
   mark_as_advanced(CTEST_TEST_CPACK)
-  set(CTEST_TEST_OSX_ARCH 0)
   set(CMake_TEST_XCODE_VERSION 0)
   if(APPLE)
-    set(CTEST_TEST_OSX_ARCH 1)
     if(XCODE_VERSION)
       set(CMake_TEST_XCODE_VERSION "${XCODE_VERSION}")
     else()
       execute_process(
         COMMAND xcodebuild -version
-        OUTPUT_VARIABLE _version ERROR_VARIABLE _version_err
+        OUTPUT_VARIABLE _version
+        RESULT_VARIABLE _failed
         )
-      if(_version MATCHES "^Xcode ([0-9]+(\\.[0-9]+)*)")
+      if(NOT _failed AND _version MATCHES "^Xcode ([0-9]+(\\.[0-9]+)*)")
         set(CMake_TEST_XCODE_VERSION "${CMAKE_MATCH_1}")
       endif()
-    endif()
-    if(NOT CMake_TEST_XCODE_VERSION VERSION_LESS 10)
-      # Since Xcode 10 we do not have two supported architectures for the host.
-      set(CTEST_TEST_OSX_ARCH 0)
     endif()
     if(CMAKE_OSX_SYSROOT)
       execute_process(
@@ -392,7 +387,19 @@ if(BUILD_TESTING)
   ADD_TEST_MACRO(TryCompile TryCompile)
   ADD_TEST_MACRO(SystemInformation SystemInformation)
   ADD_TEST_MACRO(MathTest MathTest)
+
+  string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_C "${CMake_TEST_C_STANDARDS}")
+  string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_CXX "${CMake_TEST_CXX_STANDARDS}")
+  string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_CUDA "${CMake_TEST_CUDA_STANDARDS}")
+  set(CompileFeatures_BUILD_OPTIONS
+    -DCMake_TEST_C_STANDARDS=${TEST_STDS_C}
+    -DCMake_TEST_CXX_STANDARDS=${TEST_STDS_CXX}
+    -DCMake_TEST_CUDA=${CMake_TEST_CUDA}
+    -DCMake_TEST_CUDA_STANDARDS=${TEST_STDS_CUDA}
+    )
   ADD_TEST_MACRO(CompileFeatures CompileFeatures)
+  set_property(TEST CompileFeatures APPEND PROPERTY LABELS "CUDA")
+
   ADD_TEST_MACRO(CMakeCommands.target_compile_features)
 
   if(CMake_TEST_RESOURCES)
@@ -412,6 +419,7 @@ if(BUILD_TESTING)
     PASS_REGULAR_EXPRESSION "CMake Error at CMakeLists.txt:3 \\(add_executable\\):[ \r\n]*Cannot find source file:[ \r\n]*DoesNotExist/MissingSourceFile.c")
   if(CMake_TEST_Swift)
     ADD_TEST_MACRO(SwiftOnly SwiftOnly)
+    ADD_TEST_MACRO(SwiftMixPCH SwiftMixPCH)
     if(CMake_TEST_XCODE_SWIFT)
       ADD_TEST_MACRO(SwiftMix SwiftMix)
     endif()
@@ -421,6 +429,7 @@ if(BUILD_TESTING)
   endif()
   if(CMAKE_Fortran_COMPILER)
     ADD_TEST_MACRO(FortranOnly FortranOnly)
+    set_property(TEST FortranOnly APPEND PROPERTY LABELS "Fortran")
   endif()
   # test Visual Studio GNU Fortran mixing with cmake_add_fortran_subdirectory
   # run this project if we have a working fortran compiler or
@@ -454,6 +463,7 @@ if(BUILD_TESTING)
     endif()
     if(NOT CMAKE_SKIP_VSGNUFortran)
       ADD_TEST_MACRO(VSGNUFortran ${CMAKE_CMAKE_COMMAND} -P runtest.cmake)
+      set_property(TEST VSGNUFortran APPEND PROPERTY LABELS "Fortran")
     endif()
   endif()
 
@@ -495,6 +505,10 @@ if(BUILD_TESTING)
   ADD_TEST_MACRO(ReturnTest ReturnTest)
   ADD_TEST_MACRO(Properties Properties)
   ADD_TEST_MACRO(Assembler HelloAsm)
+  # relies on Linux syscall interface
+  if(CMake_TEST_ASM_NASM AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    ADD_TEST_MACRO(NasmOnly NasmOnly)
+  endif()
   ADD_TEST_MACRO(SourceGroups SourceGroups)
   ADD_TEST_MACRO(Preprocess Preprocess)
   set(ExportImport_BUILD_OPTIONS -DCMake_TEST_NESTED_MAKE_PROGRAM:FILEPATH=${CMake_TEST_EXPLICIT_MAKE_PROGRAM}
@@ -508,15 +522,18 @@ if(BUILD_TESTING)
   ADD_TEST_MACRO(PolicyScope PolicyScope)
   ADD_TEST_MACRO(EmptyLibrary EmptyLibrary)
   ADD_TEST_MACRO(CompileDefinitions CompileDefinitions)
-  if(CMAKE_Fortran_COMPILER)
-    set(CompileOptions_BUILD_OPTIONS -DTEST_FORTRAN=1)
-  endif()
+
   if(_isMultiConfig)
     set(CompileOptions_CTEST_OPTIONS --build-config $<CONFIGURATION>)
   else()
     set(CompileOptions_BUILD_OPTIONS -DCMAKE_BUILD_TYPE=$<CONFIGURATION>)
   endif()
+  if(CMAKE_Fortran_COMPILER)
+    list(APPEND CompileOptions_BUILD_OPTIONS -DTEST_FORTRAN=1)
+  endif()
   ADD_TEST_MACRO(CompileOptions CompileOptions)
+  set_property(TEST CompileOptions APPEND PROPERTY LABELS "Fortran")
+
   ADD_TEST_MACRO(CompatibleInterface CompatibleInterface)
   ADD_TEST_MACRO(AliasTarget AliasTarget)
   ADD_TEST_MACRO(StagingPrefix StagingPrefix)
@@ -556,10 +573,13 @@ if(BUILD_TESTING)
   if("${CMAKE_GENERATOR}" MATCHES "Make")
     ADD_TEST_MACRO(Policy0002 Policy0002)
   endif()
-  if(CTEST_TEST_OSX_ARCH)
+  if(CMake_TEST_XCODE_VERSION)
+    set(Architecture_BUILD_OPTIONS -DCMake_TEST_XCODE_VERSION=${CMake_TEST_XCODE_VERSION})
     ADD_TEST_MACRO(Architecture Architecture)
     set_tests_properties(Architecture PROPERTIES
       PASS_REGULAR_EXPRESSION "(file is not of required architecture|does not match cputype|not the architecture being linked|but attempting to link with file built for)")
+    set_property(TEST Architecture APPEND PROPERTY
+      PASS_REGULAR_EXPRESSION "Skip test x86_64 only|found architecture '.*', required architecture '.*'")
   endif()
 
   list(APPEND TEST_BUILD_DIRS ${CMake_TEST_INSTALL_PREFIX})
@@ -659,6 +679,7 @@ if(BUILD_TESTING)
   if(CMAKE_Fortran_COMPILER)
     set(Module.CheckIPOSupported-Fortran_BUILD_OPTIONS -DCMake_TEST_IPO_WORKS_Fortran=${CMake_TEST_IPO_WORKS_Fortran})
     ADD_TEST_MACRO(Module.CheckIPOSupported-Fortran CheckIPOSupported-Fortran)
+    set_property(TEST Module.CheckIPOSupported-Fortran APPEND PROPERTY LABELS "Fortran")
   endif()
 
   add_test(Module.ExternalData ${CMAKE_CTEST_COMMAND}
@@ -926,6 +947,8 @@ if(BUILD_TESTING)
     "${CMake_BINARY_DIR}/Tests/BuildDepends"
     ${build_generator_args}
     --build-project BuildDepends
+    --build-options
+    "-DCMake_TEST_XCODE_VERSION=${CMake_TEST_XCODE_VERSION}"
     )
   list(APPEND TEST_BUILD_DIRS "${CMake_BINARY_DIR}/Tests/BuildDepends")
 
@@ -964,36 +987,6 @@ if(BUILD_TESTING)
     else()
       set(CTEST_RUN_CPackComponents OFF)
       set(CTEST_package_X11_TEST OFF)
-    endif()
-  endif()
-
-  # On Windows run the CPackWiXGenerator test
-  # if the WiX Toolset seems to be available
-  if(WIN32)
-    file(TO_CMAKE_PATH "$ENV{WIX}" WIX_ROOT)
-
-    find_program(WIX_LIGHT_EXECUTABLE light
-      PATHS "${WIX_ROOT}/bin"
-      DOC "WiX Toolset light.exe location")
-
-    if(WIX_LIGHT_EXECUTABLE)
-      add_test(CPackWiXGenerator ${CMAKE_CTEST_COMMAND}
-        -C \${CTEST_CONFIGURATION_TYPE}
-        --build-and-test
-        "${CMake_SOURCE_DIR}/Tests/CPackWiXGenerator"
-        "${CMake_BINARY_DIR}/Tests/CPackWiXGenerator"
-        ${build_generator_args}
-        --build-project CPackWiXGenerator
-        --build-options
-        --test-command ${CMAKE_CMAKE_COMMAND}
-          "-DCPackWiXGenerator_BINARY_DIR:PATH=${CMake_BINARY_DIR}/Tests/CPackWiXGenerator"
-          "-Dno_verify:BOOL=${CMake_TEST_WIX_NO_VERIFY}"
-          "-Dconfig=\${CTEST_CONFIGURATION_TYPE}"
-          -P "${CMake_SOURCE_DIR}/Tests/CPackWiXGenerator/RunCPackVerifyResult.cmake")
-
-      set_property(TEST CPackWiXGenerator PROPERTY
-        ATTACHED_FILES_ON_FAIL
-        "${CMake_BINARY_DIR}/Tests/CPackWiXGenerator/_CPack_Packages/win32/WIX/wix.log")
     endif()
   endif()
 
@@ -1466,6 +1459,7 @@ if(BUILD_TESTING)
   _mod
   IN ITEMS
       ALSA
+      Backtrace
       BLAS
       Boost
       BZip2
@@ -2159,7 +2153,7 @@ if(BUILD_TESTING)
     endif()
     ADD_TEST_MACRO(MSVCDebugInformationFormat)
     set_property(TEST MSVCDebugInformationFormat APPEND
-      PROPERTY LABELS "CUDA")
+      PROPERTY LABELS "CUDA" "Fortran")
 
     set(MSVCRuntimeLibrary_BUILD_OPTIONS -DCMake_TEST_CUDA=${CMake_TEST_CUDA})
     ADD_TEST_MACRO(MSVCRuntimeLibrary)
@@ -2167,6 +2161,7 @@ if(BUILD_TESTING)
       PROPERTY LABELS "CUDA")
     if(CMAKE_Fortran_COMPILER)
       ADD_TEST_MACRO(MSVCRuntimeLibrary.Fortran)
+      set_property(TEST MSVCRuntimeLibrary.Fortran APPEND PROPERTY LABELS "Fortran")
     endif()
   endif()
   if(MSVC OR
@@ -2798,7 +2793,6 @@ if(BUILD_TESTING)
     -S "${CMake_BINARY_DIR}/Tests/CTestCoverageCollectGCOV/test.cmake" -VV
     --output-log "${CMake_BINARY_DIR}/Tests/CTestCoverageCollectGCOV/testOut.log"
     )
-  set_property(TEST CTestCoverageCollectGCOV PROPERTY ENVIRONMENT CTEST_PARALLEL_LEVEL=)
 
   configure_file(
     "${CMake_SOURCE_DIR}/Tests/CTestTestEmptyBinaryDirectory/test.cmake.in"
@@ -3065,19 +3059,6 @@ if(BUILD_TESTING)
     "Test command:.*Working Directory:.*Environment variables:.*foo=bar.*this=that"
   )
 
-  configure_file(
-    "${CMake_SOURCE_DIR}/Tests/CTestTestSkipReturnCode/test.cmake.in"
-    "${CMake_BINARY_DIR}/Tests/CTestTestSkipReturnCode/test.cmake"
-    @ONLY ESCAPE_QUOTES)
-  add_test(CTestTestSkipReturnCode ${CMAKE_CTEST_COMMAND}
-    -S "${CMake_BINARY_DIR}/Tests/CTestTestSkipReturnCode/test.cmake" -V
-    --output-log "${CMake_BINARY_DIR}/Tests/CTestTestSkipReturnCode/testOutput.log"
-    -C \${CTEST_CONFIGURATION_TYPE}
-    )
-  set_tests_properties(CTestTestSkipReturnCode PROPERTIES
-    PASS_REGULAR_EXPRESSION "CMakeV1 \\.* +Passed.*CMakeV2 \\.+\\*+Skipped")
-  set_property(TEST CTestTestSkipReturnCode PROPERTY ENVIRONMENT CTEST_PARALLEL_LEVEL=)
-
   ADD_TEST_MACRO(CTestTestSerialInDepends ${CMAKE_CTEST_COMMAND} -j 4
     --output-on-failure -C "\${CTestTest_CONFIG}")
 
@@ -3086,10 +3067,6 @@ if(BUILD_TESTING)
   set_tests_properties(CTestTestMissingDependsExe PROPERTIES
     PASS_REGULAR_EXPRESSION "\\*\\*\\*Not Run"
   )
-
-  ADD_TEST_MACRO(CTestTestSerialOrder ${CMAKE_CTEST_COMMAND}
-    --output-on-failure -C "\${CTestTest_CONFIG}")
-  set_property(TEST CTestTestSerialOrder PROPERTY ENVIRONMENT CTEST_PARALLEL_LEVEL=)
 
   if(NOT BORLAND)
     set(CTestLimitDashJ_CTEST_OPTIONS --force-new-ctest-process)
@@ -3112,15 +3089,6 @@ if(BUILD_TESTING)
       -P ${CMAKE_BINARY_DIR}/Tests/CTestTestLabelRegExp/test.cmake
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/Tests/CTestTestLabelRegExp
   )
-
-  configure_file(
-    "${CMake_SOURCE_DIR}/Tests/CTestTestResourceLock/test.cmake.in"
-    "${CMake_BINARY_DIR}/Tests/CTestTestResourceLock/test.cmake"
-    @ONLY ESCAPE_QUOTES)
-  add_test(CTestTestResourceLock ${CMAKE_CTEST_COMMAND}
-    -S "${CMake_BINARY_DIR}/Tests/CTestTestResourceLock/test.cmake" -V
-    --output-log "${CMake_BINARY_DIR}/Tests/CTestTestResourceLock/output.log"
-    )
 
   configure_file(
     "${CMake_SOURCE_DIR}/Tests/CTestTestScheduler/test.cmake.in"
@@ -3361,6 +3329,7 @@ if(BUILD_TESTING)
       --build-two-config
       --test-command testf)
     list(APPEND TEST_BUILD_DIRS "${CMake_BINARY_DIR}/Tests/Fortran")
+    set_property(TEST Fortran APPEND PROPERTY LABELS "Fortran")
 
     if(CMAKE_Fortran_COMPILER_SUPPORTS_F90)
       add_test(FortranModules ${CMAKE_CTEST_COMMAND}
@@ -3375,6 +3344,7 @@ if(BUILD_TESTING)
           ${CMake_TEST_FortranModules_BUILD_OPTIONS}
         )
       list(APPEND TEST_BUILD_DIRS "${CMake_BINARY_DIR}/Tests/FortranModules")
+      set_property(TEST FortranModules APPEND PROPERTY LABELS "Fortran")
     endif()
 
     # FortranCInterface tests.
@@ -3384,6 +3354,7 @@ if(BUILD_TESTING)
       add_test(FortranC.Flags ${CMAKE_CMAKE_COMMAND} -P
         ${CMAKE_CURRENT_BINARY_DIR}/FortranC/Flags.cmake)
       list(APPEND TEST_BUILD_DIRS "${CMake_BINARY_DIR}/Tests/FortranC/Flags")
+      set_property(TEST FortranC.Flags APPEND PROPERTY LABELS "Fortran")
     else()
       add_test(FortranC ${CMAKE_CTEST_COMMAND}
         --build-and-test
@@ -3394,6 +3365,7 @@ if(BUILD_TESTING)
         --build-two-config
         --test-command CMakeFiles/FortranCInterface/FortranCInterface)
       list(APPEND TEST_BUILD_DIRS "${CMake_BINARY_DIR}/Tests/FortranC")
+      set_property(TEST FortranC APPEND PROPERTY LABELS "Fortran")
     endif()
   endif()
 

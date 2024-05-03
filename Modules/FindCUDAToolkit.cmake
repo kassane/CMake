@@ -123,6 +123,8 @@ of the following libraries that are part of the CUDAToolkit:
 - :ref:`nvidia-ML<cuda_toolkit_nvML>`
 - :ref:`nvPTX Compiler<cuda_toolkit_nvptx>`
 - :ref:`nvRTC<cuda_toolkit_nvRTC>`
+- :ref:`nvJitLink<cuda_toolkit_nvJitLink>`
+- :ref:`nvFatBin<cuda_toolkit_nvfatbin>`
 - :ref:`nvToolsExt<cuda_toolkit_nvToolsExt>`
 - :ref:`nvtx3<cuda_toolkit_nvtx3>`
 - :ref:`OpenCL<cuda_toolkit_opencl>`
@@ -158,7 +160,7 @@ Targets Created:
 cuBLAS
 """"""
 
-The `cuBLAS <https://docs.nvidia.com/cuda/cublas/index.html>`_ library.
+The `cuBLAS <https://docs.nvidia.com/cuda/cublas>`_ library.
 
 Targets Created:
 
@@ -174,7 +176,7 @@ cuDLA
 
 .. versionadded:: 3.27
 
-The NVIDIA Tegra Deep Learning Accelerator `cuDLA <https://docs.nvidia.com/cuda/cublas/index.html>`_ library.
+The NVIDIA Tegra Deep Learning Accelerator `cuDLA <https://docs.nvidia.com/cuda/cublas>`_ library.
 
 Targets Created:
 
@@ -187,7 +189,7 @@ cuFile
 
 .. versionadded:: 3.25
 
-The NVIDIA GPUDirect Storage `cuFile <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html>`_ library.
+The NVIDIA GPUDirect Storage `cuFile <https://docs.nvidia.com/gpudirect-storage/api-reference-guide>`_ library.
 
 Targets Created:
 
@@ -201,7 +203,7 @@ Targets Created:
 cuFFT
 """""
 
-The `cuFFT <https://docs.nvidia.com/cuda/cufft/index.html>`_ library.
+The `cuFFT <https://docs.nvidia.com/cuda/cufft>`_ library.
 
 Targets Created:
 
@@ -214,7 +216,7 @@ Targets Created:
 cuRAND
 """"""
 
-The `cuRAND <https://docs.nvidia.com/cuda/curand/index.html>`_ library.
+The `cuRAND <https://docs.nvidia.com/cuda/curand>`_ library.
 
 Targets Created:
 
@@ -226,7 +228,7 @@ Targets Created:
 cuSOLVER
 """"""""
 
-The `cuSOLVER <https://docs.nvidia.com/cuda/cusolver/index.html>`_ library.
+The `cuSOLVER <https://docs.nvidia.com/cuda/cusolver>`_ library.
 
 Targets Created:
 
@@ -238,7 +240,7 @@ Targets Created:
 cuSPARSE
 """"""""
 
-The `cuSPARSE <https://docs.nvidia.com/cuda/cusparse/index.html>`_ library.
+The `cuSPARSE <https://docs.nvidia.com/cuda/cusparse>`_ library.
 
 Targets Created:
 
@@ -269,7 +271,7 @@ Targets Created:
 NPP
 """
 
-The `NPP <https://docs.nvidia.com/cuda/npp/index.html>`_ libraries.
+The `NPP <https://docs.nvidia.com/cuda/npp>`_ libraries.
 
 Targets Created:
 
@@ -339,7 +341,7 @@ Targets Created:
 nvBLAS
 """"""
 
-The `nvBLAS <https://docs.nvidia.com/cuda/nvblas/index.html>`_ libraries.
+The `nvBLAS <https://docs.nvidia.com/cuda/nvblas>`_ libraries.
 This is a shared library only.
 
 Targets Created:
@@ -365,7 +367,7 @@ Targets Created:
 nvJPEG
 """"""
 
-The `nvJPEG <https://docs.nvidia.com/cuda/nvjpeg/index.html>`_ library.
+The `nvJPEG <https://docs.nvidia.com/cuda/nvjpeg>`_ library.
 Introduced in CUDA 10.
 
 Targets Created:
@@ -380,7 +382,7 @@ nvPTX Compiler
 
 .. versionadded:: 3.25
 
-The `nvPTX <https://docs.nvidia.com/cuda/ptx-compiler-api/index.html>`_ (PTX Compilation) library.
+The `nvPTX <https://docs.nvidia.com/cuda/ptx-compiler-api>`_ (PTX Compilation) library.
 The PTX Compiler APIs are a set of APIs which can be used to compile a PTX program into GPU assembly code.
 Introduced in CUDA 11.1
 This is a static library only.
@@ -394,7 +396,7 @@ Targets Created:
 nvRTC
 """""
 
-The `nvRTC <https://docs.nvidia.com/cuda/nvrtc/index.html>`_ (Runtime Compilation) library.
+The `nvRTC <https://docs.nvidia.com/cuda/nvrtc>`_ (Runtime Compilation) library.
 
 Targets Created:
 
@@ -418,12 +420,26 @@ Targets Created:
 - ``CUDA::nvJitLink`` starting in CUDA 12.0
 - ``CUDA::nvJitLink_static``  starting in CUDA 12.0
 
+.. _`cuda_toolkit_nvfatbin`:
+
+nvFatBin
+"""""""""
+
+.. versionadded:: 3.30
+
+The `nvFatBin <https://docs.nvidia.com/cuda/>`_ (Runtime fatbin creation) library.
+
+Targets Created:
+
+- ``CUDA::nvfatbin`` starting in CUDA 12.4
+- ``CUDA::nvfatbin_static``  starting in CUDA 12.4
+
 .. _`cuda_toolkit_nvml`:
 
 nvidia-ML
 """""""""
 
-The `NVIDIA Management Library <https://developer.nvidia.com/nvidia-management-library-nvml>`_.
+The `NVIDIA Management Library <https://developer.nvidia.com/management-library-nvml>`_.
 This is a shared library only.
 
 Targets Created:
@@ -451,7 +467,7 @@ nvtx3
 
 .. versionadded:: 3.25
 
-The header-only `NVIDIA Tools Extension Library <https://nvidia.github.io/NVTX/doxygen/index.html>`_.
+The header-only `NVIDIA Tools Extension Library <https://nvidia.github.io/NVTX/doxygen>`_.
 Introduced in CUDA 10.0.
 
 Targets created:
@@ -1137,20 +1153,11 @@ if(CUDAToolkit_FOUND)
     target_link_directories(CUDA::toolkit INTERFACE "${CUDAToolkit_LIBRARY_DIR}")
   endif()
 
-  _CUDAToolkit_find_and_add_import_lib(cuda_driver ALT cuda)
-
-  _CUDAToolkit_find_and_add_import_lib(cudart)
-  _CUDAToolkit_find_and_add_import_lib(cudart_static)
-
-  # setup dependencies that are required for cudart_static when building
+  # setup dependencies that are required for cudart/cudart_static when building
   # on linux. These are generally only required when using the CUDA toolkit
   # when CUDA language is disabled
-  if(NOT TARGET CUDA::cudart_static_deps
-     AND TARGET CUDA::cudart_static)
-
+  if(NOT TARGET CUDA::cudart_static_deps)
     add_library(CUDA::cudart_static_deps IMPORTED INTERFACE)
-    target_link_libraries(CUDA::cudart_static INTERFACE CUDA::cudart_static_deps)
-
     if(UNIX AND (CMAKE_C_COMPILER OR CMAKE_CXX_COMPILER))
       find_package(Threads REQUIRED)
       target_link_libraries(CUDA::cudart_static_deps INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
@@ -1168,9 +1175,18 @@ if(CUDAToolkit_FOUND)
     endif()
   endif()
 
+  _CUDAToolkit_find_and_add_import_lib(cuda_driver ALT cuda DEPS cudart_static_deps)
+  _CUDAToolkit_find_and_add_import_lib(cudart DEPS cudart_static_deps)
+  _CUDAToolkit_find_and_add_import_lib(cudart_static DEPS cudart_static_deps)
+
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.0.0)
     _CUDAToolkit_find_and_add_import_lib(nvJitLink)
     _CUDAToolkit_find_and_add_import_lib(nvJitLink_static DEPS cudart_static_deps)
+  endif()
+
+  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.4.0)
+    _CUDAToolkit_find_and_add_import_lib(nvfatbin DEPS cudart_static_deps)
+    _CUDAToolkit_find_and_add_import_lib(nvfatbin_static DEPS cudart_static_deps)
   endif()
 
   _CUDAToolkit_find_and_add_import_lib(culibos) # it's a static library
@@ -1188,7 +1204,7 @@ if(CUDAToolkit_FOUND)
 
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 11.0.0)
     # cublas depends on cublasLt
-    # https://docs.nvidia.com/cuda/archive/11.0/cublas/index.html#static-library
+    # https://docs.nvidia.com/cuda/archive/11.0/cublas#static-library
     _CUDAToolkit_find_and_add_import_lib(cublas DEPS cublasLt culibos)
     _CUDAToolkit_find_and_add_import_lib(cublas_static DEPS cublasLt_static culibos)
   else()
@@ -1221,14 +1237,14 @@ if(CUDAToolkit_FOUND)
   set(cusolver_static_deps cublas_static cusparse_static culibos)
   if(CUDAToolkit_VERSION VERSION_GREATER 11.2.1)
     # cusolver depends on libcusolver_metis and cublasLt
-    # https://docs.nvidia.com/cuda/archive/11.2.2/cusolver/index.html#link-dependency
+    # https://docs.nvidia.com/cuda/archive/11.2.2/cusolver#link-dependency
     list(APPEND cusolver_deps cublasLt)
     _CUDAToolkit_find_and_add_import_lib(cusolver_metis_static ALT metis_static) # implementation detail static lib
     list(APPEND cusolver_static_deps cusolver_metis_static cublasLt_static)
   endif()
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.1.2)
     # cusolver depends on liblapack_static.a starting with CUDA 10.1 update 2,
-    # https://docs.nvidia.com/cuda/archive/11.5.0/cusolver/index.html#static-link-lapack
+    # https://docs.nvidia.com/cuda/archive/11.5.0/cusolver#static-link-lapack
     _CUDAToolkit_find_and_add_import_lib(cusolver_lapack_static ALT lapack_static) # implementation detail static lib
     list(APPEND cusolver_static_deps cusolver_lapack_static)
   endif()
@@ -1286,17 +1302,17 @@ if(CUDAToolkit_FOUND)
 
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 11.1.0)
     if(NOT TARGET CUDA::nvptxcompiler_static)
-      _CUDAToolkit_find_and_add_import_lib(nvptxcompiler_static DEPS cuda_driver)
+      _CUDAToolkit_find_and_add_import_lib(nvptxcompiler_static)
       if(TARGET CUDA::nvptxcompiler_static)
         target_link_libraries(CUDA::nvptxcompiler_static INTERFACE CUDA::cudart_static_deps)
       endif()
     endif()
   endif()
 
-  _CUDAToolkit_find_and_add_import_lib(nvrtc_builtins ALT nvrtc-builtins DEPS cuda_driver)
+  _CUDAToolkit_find_and_add_import_lib(nvrtc_builtins ALT nvrtc-builtins)
   _CUDAToolkit_find_and_add_import_lib(nvrtc DEPS nvrtc_builtins nvJitLink)
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 11.5.0)
-    _CUDAToolkit_find_and_add_import_lib(nvrtc_builtins_static ALT nvrtc-builtins_static DEPS cuda_driver)
+    _CUDAToolkit_find_and_add_import_lib(nvrtc_builtins_static ALT nvrtc-builtins_static)
     if(NOT TARGET CUDA::nvrtc_static)
       _CUDAToolkit_find_and_add_import_lib(nvrtc_static DEPS nvrtc_builtins_static nvptxcompiler_static nvJitLink_static)
       if(TARGET CUDA::nvrtc_static AND WIN32 AND NOT (BORLAND OR MINGW OR CYGWIN))

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <cm/optional>
+#include <cm/string_view>
 
 #include "cmAlgorithms.h"
 #include "cmComputeLinkInformation.h"
@@ -99,6 +100,7 @@ public:
   cmStateEnums::TargetType GetType() const;
   const std::string& GetName() const;
   std::string GetExportName() const;
+  std::string GetFilesystemExportName() const;
 
   std::vector<std::string> GetPropertyKeys() const;
   //! Might return a nullptr if the property is not set or invalid
@@ -597,6 +599,8 @@ public:
   std::vector<BT<std::string>> GetPrecompileHeaders(
     const std::string& config, const std::string& language) const;
 
+  std::vector<std::string> GetPchArchs(std::string const& config,
+                                       std::string const& lang) const;
   std::string GetPchHeader(const std::string& config,
                            const std::string& language,
                            const std::string& arch = std::string()) const;
@@ -727,7 +731,10 @@ public:
    */
   void ClearSourcesCache();
 
-  // Do not use.  This is only for a specific call site with a FIXME comment.
+  /**
+   * Clears cached evaluations of INTERFACE_LINK_LIBRARIES.
+   * They will be recomputed on demand.
+   */
   void ClearLinkInterfaceCache();
 
   void AddSource(const std::string& src, bool before = false);
@@ -880,7 +887,19 @@ public:
   std::string EvaluateInterfaceProperty(
     std::string const& prop, cmGeneratorExpressionContext* context,
     cmGeneratorExpressionDAGChecker* dagCheckerParent,
-    LinkInterfaceFor interfaceFor = LinkInterfaceFor::Usage) const;
+    LinkInterfaceFor interfaceFor) const;
+
+  struct TransitiveProperty
+  {
+    cm::string_view InterfaceName;
+    LinkInterfaceFor InterfaceFor;
+  };
+
+  static const std::map<cm::string_view, TransitiveProperty>
+    BuiltinTransitiveProperties;
+
+  cm::optional<TransitiveProperty> IsTransitiveProperty(
+    cm::string_view prop, cmLocalGenerator const* lg) const;
 
   bool HaveInstallTreeRPATH(const std::string& config) const;
 
@@ -958,6 +977,7 @@ public:
 
   std::string GetImportedXcFrameworkPath(const std::string& config) const;
 
+  bool ApplyCXXStdTargets();
   bool DiscoverSyntheticTargets(cmSyntheticTargetCache& cache,
                                 std::string const& config);
 
@@ -1337,6 +1357,13 @@ public:
                                        cmSourceFile const* sf) const;
   bool NeedDyndepForSource(std::string const& lang, std::string const& config,
                            cmSourceFile const* sf) const;
+  enum class CxxModuleSupport
+  {
+    Unavailable,
+    Enabled,
+    Disabled,
+  };
+  CxxModuleSupport NeedCxxDyndep(std::string const& config) const;
 
 private:
   void BuildFileSetInfoCache(std::string const& config) const;

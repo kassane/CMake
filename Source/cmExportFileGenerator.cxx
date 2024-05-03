@@ -11,6 +11,7 @@
 
 #include <cm/memory>
 #include <cm/optional>
+#include <cm/string_view>
 #include <cmext/string_view>
 
 #include "cmsys/FStream.hxx"
@@ -985,8 +986,9 @@ void cmExportFileGenerator::GeneratePolicyHeaderCode(std::ostream& os)
   /* clang-format on */
 
   // Isolate the file policy level.
-  // Support CMake versions as far back as 2.6 but also support using NEW
-  // policy settings for up to CMake 3.27 (this upper limit may be reviewed
+  // Support CMake versions as far back as the
+  // RequiredCMakeVersion{Major,Minor,Patch}, but also support using NEW
+  // policy settings for up to CMake 3.28 (this upper limit may be reviewed
   // and increased from time to time). This reduces the opportunity for CMake
   // warnings when an older export file is later used with newer CMake
   // versions.
@@ -995,7 +997,7 @@ void cmExportFileGenerator::GeneratePolicyHeaderCode(std::ostream& os)
      << "cmake_policy(VERSION "
      << this->RequiredCMakeVersionMajor << '.'
      << this->RequiredCMakeVersionMinor << '.'
-     << this->RequiredCMakeVersionPatch << "...3.27)\n";
+     << this->RequiredCMakeVersionPatch << "...3.28)\n";
   /* clang-format on */
 }
 
@@ -1259,7 +1261,7 @@ void cmExportFileGenerator::GenerateFindDependencyCalls(std::ostream& os)
 
   for (auto const& it : packageDependenciesSorted) {
     if (it.second.Enabled == cmExportSet::PackageDependencyExportEnabled::On) {
-      os << "find_dependency(" << it.first << " REQUIRED";
+      os << "find_dependency(" << it.first;
       for (auto const& arg : it.second.ExtraArguments) {
         os << " " << cmOutputConverter::EscapeForCMake(arg);
       }
@@ -1386,6 +1388,12 @@ void cmExportFileGenerator::GenerateImportedFileChecksCode(
   os << ")\n\n";
 }
 
+enum class ExportWhen
+{
+  Defined,
+  Always,
+};
+
 enum class PropertyType
 {
   Strings,
@@ -1407,6 +1415,12 @@ bool PropertyTypeIsForPaths(PropertyType pt)
 }
 }
 
+struct ModuleTargetPropertyTable
+{
+  cm::static_string_view Name;
+  ExportWhen Cond;
+};
+
 struct ModulePropertyTable
 {
   cm::static_string_view Name;
@@ -1422,18 +1436,29 @@ bool cmExportFileGenerator::PopulateCxxModuleExportProperties(
     return true;
   }
 
-  const cm::static_string_view exportedDirectModuleProperties[] = {
-    "CXX_EXTENSIONS"_s,
+  const ModuleTargetPropertyTable exportedDirectModuleProperties[] = {
+    { "CXX_EXTENSIONS"_s, ExportWhen::Defined },
+    // Always define this property as it is an intrinsic property of the target
+    // and should not be inherited from the in-scope `CMAKE_CXX_MODULE_STD`
+    // variable.
+    //
+    // TODO(cxxmodules): A future policy may make this "ON" based on the target
+    // policies if unset. Add a new `ExportWhen` condition to handle it when
+    // this happens.
+    { "CXX_MODULE_STD"_s, ExportWhen::Always },
   };
-  for (auto const& propName : exportedDirectModuleProperties) {
-    auto const propNameStr = std::string(propName);
-    cmValue prop = gte->Target->GetComputedProperty(
+  for (auto const& prop : exportedDirectModuleProperties) {
+    auto const propNameStr = std::string(prop.Name);
+    cmValue propValue = gte->Target->GetComputedProperty(
       propNameStr, *gte->Target->GetMakefile());
-    if (!prop) {
-      prop = gte->Target->GetProperty(propNameStr);
+    if (!propValue) {
+      propValue = gte->Target->GetProperty(propNameStr);
     }
-    if (prop) {
-      properties[propNameStr] = cmGeneratorExpression::Preprocess(*prop, ctx);
+    if (propValue) {
+      properties[propNameStr] =
+        cmGeneratorExpression::Preprocess(*propValue, ctx);
+    } else if (prop.Cond == ExportWhen::Always) {
+      properties[propNameStr] = "";
     }
   }
 
@@ -1486,11 +1511,7 @@ bool cmExportFileGenerator::PopulateCxxModuleExportProperties(
       auto value = cmGeneratorExpression::Preprocess(*prop, ctx);
       this->ResolveTargetsInGeneratorExpressions(
         value, gte, cmExportFileGenerator::ReplaceFreeTargets);
-      std::vector<std::string> wrappedValues;
-      for (auto& item : cmList{ value }) {
-        wrappedValues.push_back(cmStrCat("$<COMPILE_ONLY:", item, '>'));
-      }
-      properties[exportedPropName] = cmJoin(wrappedValues, ";");
+      properties[exportedPropName] = value;
     }
   }
 
@@ -1581,7 +1602,9 @@ void cmExportFileGenerator::GenerateTargetFileSets(cmGeneratorTarget* gte,
         return;
       }
 
-      os << "\n      " << this->GetFileSetDirectories(gte, fileSet, te);
+      if (fileSet->GetType() == "HEADERS"_s) {
+        os << "\n      " << this->GetFileSetDirectories(gte, fileSet, te);
+      }
     }
     os << "\n  )\nendif()\n\n";
   }

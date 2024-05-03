@@ -194,6 +194,7 @@ Properties on Targets
    /prop_tgt/CXX_MODULE_SET
    /prop_tgt/CXX_MODULE_SET_NAME
    /prop_tgt/CXX_MODULE_SETS
+   /prop_tgt/CXX_MODULE_STD
    /prop_tgt/CXX_SCAN_FOR_MODULES
    /prop_tgt/CXX_STANDARD
    /prop_tgt/CXX_STANDARD_REQUIRED
@@ -445,7 +446,9 @@ Properties on Targets
    /prop_tgt/VS_SDK_REFERENCES
    /prop_tgt/VS_SOLUTION_DEPLOY
    /prop_tgt/VS_SOURCE_SETTINGS_tool
+   /prop_tgt/VS_USE_DEBUG_LIBRARIES
    /prop_tgt/VS_USER_PROPS
+   /prop_tgt/VS_FILTER_PROPS
    /prop_tgt/VS_WINDOWS_TARGET_PLATFORM_MIN_VERSION
    /prop_tgt/VS_WINRT_COMPONENT
    /prop_tgt/VS_WINRT_REFERENCES

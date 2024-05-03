@@ -269,7 +269,7 @@ bool cmGlobalXCodeGenerator::FindMakeProgram(cmMakefile* mf)
   // The Xcode generator knows how to lookup its build tool
   // directly instead of needing a helper module to do it, so we
   // do not actually need to put CMAKE_MAKE_PROGRAM into the cache.
-  if (cmIsOff(mf->GetDefinition("CMAKE_MAKE_PROGRAM"))) {
+  if (mf->GetDefinition("CMAKE_MAKE_PROGRAM").IsOff()) {
     mf->AddDefinition("CMAKE_MAKE_PROGRAM", this->GetXcodeBuildCommand());
   }
   return true;
@@ -1095,7 +1095,7 @@ std::string GetSourcecodeValueFromFileExtension(
   bool& keepLastKnownFileType, const std::vector<std::string>& enabled_langs)
 {
   std::string ext = cmSystemTools::LowerCase(_ext);
-  std::string sourcecode = "sourcecode";
+  std::string sourcecode = "default";
 
   if (ext == "o"_s) {
     keepLastKnownFileType = true;
@@ -1110,42 +1110,42 @@ std::string GetSourcecodeValueFromFileExtension(
     sourcecode = "file.storyboard";
     // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (ext == "mm"_s && !cm::contains(enabled_langs, "OBJCXX")) {
-    sourcecode += ".cpp.objcpp";
+    sourcecode = "sourcecode.cpp.objcpp";
     // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (ext == "m"_s && !cm::contains(enabled_langs, "OBJC")) {
-    sourcecode += ".c.objc";
+    sourcecode = "sourcecode.c.objc";
   } else if (ext == "swift"_s) {
-    sourcecode += ".swift";
+    sourcecode = "sourcecode.swift";
   } else if (ext == "plist"_s) {
-    sourcecode += ".text.plist";
+    sourcecode = "sourcecode.text.plist";
   } else if (ext == "h"_s) {
-    sourcecode += ".c.h";
+    sourcecode = "sourcecode.c.h";
   } else if (ext == "hxx"_s || ext == "hpp"_s || ext == "txx"_s ||
              ext == "pch"_s || ext == "hh"_s || ext == "inl"_s) {
-    sourcecode += ".cpp.h";
+    sourcecode = "sourcecode.cpp.h";
   } else if (ext == "png"_s || ext == "gif"_s || ext == "jpg"_s) {
     keepLastKnownFileType = true;
     sourcecode = "image";
   } else if (ext == "txt"_s) {
-    sourcecode += ".text";
+    sourcecode = "sourcecode.text";
   } else if (lang == "CXX"_s) {
-    sourcecode += ".cpp.cpp";
+    sourcecode = "sourcecode.cpp.cpp";
   } else if (lang == "C"_s) {
-    sourcecode += ".c.c";
+    sourcecode = "sourcecode.c.c";
   } else if (lang == "OBJCXX"_s) {
-    sourcecode += ".cpp.objcpp";
+    sourcecode = "sourcecode.cpp.objcpp";
   } else if (lang == "OBJC"_s) {
-    sourcecode += ".c.objc";
+    sourcecode = "sourcecode.c.objc";
   } else if (lang == "Fortran"_s) {
-    sourcecode += ".fortran.f90";
+    sourcecode = "sourcecode.fortran.f90";
   } else if (lang == "ASM"_s) {
-    sourcecode += ".asm";
+    sourcecode = "sourcecode.asm";
   } else if (ext == "metal"_s) {
-    sourcecode += ".metal";
+    sourcecode = "sourcecode.metal";
   } else if (ext == "mig"_s) {
-    sourcecode += ".mig";
+    sourcecode = "sourcecode.mig";
   } else if (ext == "tbd"_s) {
-    sourcecode += ".text-based-dylib-definition";
+    sourcecode = "sourcecode.text-based-dylib-definition";
   } else if (ext == "a"_s) {
     keepLastKnownFileType = true;
     sourcecode = "archive.ar";
@@ -3067,7 +3067,8 @@ void cmGlobalXCodeGenerator::CreateBuildSettings(cmGeneratorTarget* gtgt,
   }
 
   // Precompile Headers
-  std::string pchHeader = gtgt->GetPchHeader(configName, llang);
+  std::string pchHeader =
+    gtgt->GetPchHeader(configName, langForPreprocessorDefinitions);
   if (!pchHeader.empty()) {
     buildSettings->AddAttribute("GCC_PREFIX_HEADER",
                                 this->CreateString(pchHeader));
@@ -3114,8 +3115,12 @@ cmXCodeObject* cmGlobalXCodeGenerator::CreateUtilityTarget(
     "shellScript", this->CreateString("# shell script goes here\nexit 0"));
   shellBuildPhase->AddAttribute("showEnvVarsInLog", this->CreateString("0"));
 
-  cmXCodeObject* target =
-    this->CreateObject(cmXCodeObject::PBXAggregateTarget);
+  std::string targetBinaryPath = cmStrCat(
+    gtgt->Makefile->GetCurrentBinaryDirectory(), '/', gtgt->GetName());
+
+  cmXCodeObject* target = this->CreateObject(
+    cmXCodeObject::PBXAggregateTarget,
+    cmStrCat("PBXAggregateTarget:", gtgt->GetName(), ":", targetBinaryPath));
   target->SetComment(gtgt->GetName());
   cmXCodeObject* buildPhases = this->CreateObject(cmXCodeObject::OBJECT_LIST);
   std::vector<cmXCodeObject*> emptyContentVector;
@@ -3339,7 +3344,14 @@ cmXCodeObject* cmGlobalXCodeGenerator::CreateXCodeTarget(
   if (!gtgt->IsInBuildSystem()) {
     return nullptr;
   }
-  cmXCodeObject* target = this->CreateObject(cmXCodeObject::PBXNativeTarget);
+
+  std::string targetBinaryPath = this->RelativeToRootBinary(cmStrCat(
+    gtgt->Makefile->GetCurrentBinaryDirectory(), '/', gtgt->GetName()));
+
+  cmXCodeObject* target = this->CreateObject(
+    cmXCodeObject::PBXNativeTarget,
+    cmStrCat("PBXNativeTarget:", gtgt->GetName(), ":", targetBinaryPath));
+
   target->AddAttribute("buildPhases", buildPhases);
   cmXCodeObject* buildRules = this->CreateObject(cmXCodeObject::OBJECT_LIST);
   target->AddAttribute("buildRules", buildRules);
@@ -4222,18 +4234,18 @@ void cmGlobalXCodeGenerator::AddEmbeddedObjects(
     cmXCodeObject* attrs = this->CreateObject(cmXCodeObject::OBJECT_LIST);
 
     bool removeHeaders = actionsOnByDefault & RemoveHeadersOnCopyByDefault;
-    if (auto prop = gt->GetProperty(
+    if (cmValue prop = gt->GetProperty(
           cmStrCat(embedPropertyName, "_REMOVE_HEADERS_ON_COPY"))) {
-      removeHeaders = cmIsOn(*prop);
+      removeHeaders = prop.IsOn();
     }
     if (removeHeaders) {
       attrs->AddObject(this->CreateString("RemoveHeadersOnCopy"));
     }
 
     bool codeSign = actionsOnByDefault & CodeSignOnCopyByDefault;
-    if (auto prop =
+    if (cmValue prop =
           gt->GetProperty(cmStrCat(embedPropertyName, "_CODE_SIGN_ON_COPY"))) {
-      codeSign = cmIsOn(*prop);
+      codeSign = prop.IsOn();
     }
     if (codeSign) {
       attrs->AddObject(this->CreateString("CodeSignOnCopy"));
@@ -5129,6 +5141,17 @@ std::string cmGlobalXCodeGenerator::RelativeToSource(const std::string& p)
   return p;
 }
 
+std::string cmGlobalXCodeGenerator::RelativeToRootBinary(const std::string& p)
+{
+  std::string binaryDirectory =
+    this->CurrentRootGenerator->GetCurrentBinaryDirectory();
+  if (cmSystemTools::IsSubDirectory(p, binaryDirectory)) {
+    binaryDirectory = cmSystemTools::ForceToRelativePath(binaryDirectory, p);
+  }
+
+  return binaryDirectory;
+}
+
 std::string cmGlobalXCodeGenerator::RelativeToBinary(const std::string& p)
 {
   return this->CurrentRootGenerator->MaybeRelativeToCurBinDir(p);
@@ -5297,7 +5320,7 @@ bool cmGlobalXCodeGenerator::UseEffectivePlatformName(cmMakefile* mf) const
     return mf->PlatformIsAppleEmbedded();
   }
 
-  return cmIsOn(*epnValue);
+  return epnValue.IsOn();
 }
 
 bool cmGlobalXCodeGenerator::ShouldStripResourcePath(cmMakefile*) const
