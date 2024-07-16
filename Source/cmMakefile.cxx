@@ -2621,6 +2621,14 @@ bool cmMakefile::PlatformIsAppleSimulator() const
     .count(this->GetAppleSDKType());
 }
 
+bool cmMakefile::PlatformIsAppleCatalyst() const
+{
+  std::string systemName;
+  systemName = this->GetSafeDefinition("CMAKE_SYSTEM_NAME");
+  systemName = cmSystemTools::LowerCase(systemName);
+  return systemName == "ios" && this->GetAppleSDKType() == AppleSDK::MacOS;
+}
+
 bool cmMakefile::PlatformSupportsAppleTextStubs() const
 {
   return this->IsOn("APPLE") && this->IsSet("CMAKE_TAPI");
@@ -4657,7 +4665,7 @@ bool cmMakefile::SetPolicy(cmPolicies::PolicyID id,
   }
 
   // Deprecate old policies.
-  if (status == cmPolicies::OLD && id <= cmPolicies::CMP0128 &&
+  if (status == cmPolicies::OLD && id <= cmPolicies::CMP0129 &&
       !(this->GetCMakeInstance()->GetIsInTryCompile() &&
         (
           // Policies set by cmCoreTryCompile::TryCompileCode.

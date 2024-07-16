@@ -314,6 +314,9 @@ dependencies.
 Target Compile Properties
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
+These represent the `build specification <Target Build Specification_>`_
+for compiling a target.
+
 :prop_tgt:`COMPILE_DEFINITIONS`
   List of compile definitions for compiling sources in the target.
   These are passed to the compiler with ``-D`` flags, or equivalent,
@@ -377,6 +380,9 @@ Target Compile Properties
 
 Target Link Properties
 ^^^^^^^^^^^^^^^^^^^^^^
+
+These represent the `build specification <Target Build Specification_>`_
+for linking a target.
 
 :prop_tgt:`LINK_LIBRARIES`
   List of link libraries for linking the target, if it is an executable,
@@ -510,6 +516,9 @@ command.  See :ref:`Creating Packages` for more.
 Transitive Compile Properties
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+These represent `usage requirements <Target Usage Requirements_>`_ for
+compiling consumers.
+
 :prop_tgt:`INTERFACE_COMPILE_DEFINITIONS`
   List of compile definitions for compiling sources in the target's consumers.
   Typically these are used by the target's header files.
@@ -561,6 +570,9 @@ Transitive Compile Properties
 Transitive Link Properties
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+These represent `usage requirements <Target Usage Requirements_>`_ for
+linking consumers.
+
 :prop_tgt:`INTERFACE_LINK_LIBRARIES`
   List of link libraries for linking the target's consumers, for
   those that are executables, shared libraries, or module libraries.
@@ -589,6 +601,65 @@ Transitive Link Properties
 
   List of files on which linking the target's consumers depends, for
   those that are executables, shared libraries, or module libraries.
+
+.. _`Custom Transitive Properties`:
+
+Custom Transitive Properties
+----------------------------
+
+.. versionadded:: 3.30
+
+The :genex:`TARGET_PROPERTY` generator expression evaluates the above
+`build specification <Target Build Specification_>`_ and
+`usage requirement <Target Usage Requirements_>`_ properties
+as builtin transitive properties.  It also supports custom transitive
+properties defined by the :prop_tgt:`TRANSITIVE_COMPILE_PROPERTIES`
+and :prop_tgt:`TRANSITIVE_LINK_PROPERTIES` properties on the target
+and its link dependencies.
+
+For example:
+
+.. code-block:: cmake
+
+  add_library(example INTERFACE)
+  set_target_properties(example PROPERTIES
+    TRANSITIVE_COMPILE_PROPERTIES "CUSTOM_C"
+    TRANSITIVE_LINK_PROPERTIES    "CUSTOM_L"
+
+    INTERFACE_CUSTOM_C "EXAMPLE_CUSTOM_C"
+    INTERFACE_CUSTOM_L "EXAMPLE_CUSTOM_L"
+    )
+
+  add_library(mylib STATIC mylib.c)
+  target_link_libraries(mylib PRIVATE example)
+  set_target_properties(mylib PROPERTIES
+    CUSTOM_C           "MYLIB_PRIVATE_CUSTOM_C"
+    CUSTOM_L           "MYLIB_PRIVATE_CUSTOM_L"
+    INTERFACE_CUSTOM_C "MYLIB_IFACE_CUSTOM_C"
+    INTERFACE_CUSTOM_L "MYLIB_IFACE_CUSTOM_L"
+    )
+
+  add_executable(myexe myexe.c)
+  target_link_libraries(myexe PRIVATE mylib)
+  set_target_properties(myexe PROPERTIES
+    CUSTOM_C "MYEXE_CUSTOM_C"
+    CUSTOM_L "MYEXE_CUSTOM_L"
+    )
+
+  add_custom_target(print ALL VERBATIM
+    COMMAND ${CMAKE_COMMAND} -E echo
+      # Prints "MYLIB_PRIVATE_CUSTOM_C;EXAMPLE_CUSTOM_C"
+      "$<TARGET_PROPERTY:mylib,CUSTOM_C>"
+
+      # Prints "MYLIB_PRIVATE_CUSTOM_L;EXAMPLE_CUSTOM_L"
+      "$<TARGET_PROPERTY:mylib,CUSTOM_L>"
+
+      # Prints "MYEXE_CUSTOM_C"
+      "$<TARGET_PROPERTY:myexe,CUSTOM_C>"
+
+      # Prints "MYEXE_CUSTOM_L;MYLIB_IFACE_CUSTOM_L;EXAMPLE_CUSTOM_L"
+      "$<TARGET_PROPERTY:myexe,CUSTOM_L>"
+    )
 
 .. _`Compatible Interface Properties`:
 

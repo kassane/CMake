@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <map>
 #include <set>
 #include <sstream>
@@ -35,6 +36,7 @@
 #include "cmELF.h"
 #include "cmExecutionStatus.h"
 #include "cmFSPermissions.h"
+#include "cmFileCommand_ReadMacho.h"
 #include "cmFileCopier.h"
 #include "cmFileInstaller.h"
 #include "cmFileLockPool.h"
@@ -73,6 +75,11 @@ namespace {
 bool HandleWriteImpl(std::vector<std::string> const& args, bool append,
                      cmExecutionStatus& status)
 {
+  if (args.size() < 2) {
+    status.SetError(cmStrCat(
+      args[0], " must be called with at least one additional argument."));
+    return false;
+  }
   auto i = args.begin();
 
   i++; // Get rid of subcommand
@@ -658,8 +665,11 @@ bool HandleStringsCommand(std::vector<std::string> const& args,
 bool HandleGlobImpl(std::vector<std::string> const& args, bool recurse,
                     cmExecutionStatus& status)
 {
-  // File commands has at least one argument
-  assert(args.size() > 1);
+  if (args.size() < 2) {
+    status.SetError(cmStrCat(
+      args[0], " must be called with at least one additional argument."));
+    return false;
+  }
 
   auto i = args.begin();
 
@@ -869,8 +879,44 @@ bool HandleGlobRecurseCommand(std::vector<std::string> const& args,
 bool HandleMakeDirectoryCommand(std::vector<std::string> const& args,
                                 cmExecutionStatus& status)
 {
-  // File command has at least one argument
-  assert(args.size() > 1);
+  // Projects might pass a dynamically generated list of directories, and it
+  // could be an empty list. We should not assume there is at least one.
+
+  cmRange<std::vector<std::string>::const_iterator> argsRange =
+    cmMakeRange(args).advance(1); // Get rid of subcommand
+
+  struct Arguments : public ArgumentParser::ParseResult
+  {
+    std::string Result;
+  };
+  Arguments arguments;
+
+  auto resultPosItr =
+    std::find(cm::begin(argsRange), cm::end(argsRange), "RESULT");
+  if (resultPosItr != cm::end(argsRange)) {
+    static auto const parser =
+      cmArgumentParser<Arguments>{}.Bind("RESULT"_s, &Arguments::Result);
+    std::vector<std::string> unparsedArguments;
+    auto resultDistanceFromBegin =
+      std::distance(cm::begin(argsRange), resultPosItr);
+    arguments =
+      parser.Parse(cmMakeRange(argsRange).advance(resultDistanceFromBegin),
+                   &unparsedArguments);
+
+    if (!unparsedArguments.empty()) {
+      std::string unexpectedArgsStr = cmJoin(
+        cmMakeRange(cm::begin(unparsedArguments), cm::end(unparsedArguments)),
+        "\n");
+      status.SetError("MAKE_DIRECTORY called with unexpected\n"
+                      "arguments:\n" +
+                      unexpectedArgsStr);
+      return false;
+    }
+
+    auto resultDistanceFromEnd =
+      std::distance(cm::end(argsRange), resultPosItr);
+    argsRange = argsRange.retreat(-resultDistanceFromEnd);
+  }
 
   std::string expr;
   for (std::string const& arg :
@@ -883,19 +929,33 @@ bool HandleMakeDirectoryCommand(std::vector<std::string> const& args,
       cdir = &expr;
     }
     if (!status.GetMakefile().CanIWriteThisFile(*cdir)) {
-      std::string e = "attempted to create a directory: " + *cdir +
-        " into a source directory.";
-      status.SetError(e);
-      cmSystemTools::SetFatalErrorOccurred();
-      return false;
+      std::string e = cmStrCat("attempted to create a directory: ", *cdir,
+                               " into a source directory.");
+      if (arguments.Result.empty()) {
+        status.SetError(e);
+        cmSystemTools::SetFatalErrorOccurred();
+        return false;
+      }
+      status.GetMakefile().AddDefinition(arguments.Result, e);
+      return true;
     }
     cmsys::Status mkdirStatus = cmSystemTools::MakeDirectory(*cdir);
     if (!mkdirStatus) {
-      std::string error = cmStrCat("failed to create directory:\n  ", *cdir,
-                                   "\nbecause: ", mkdirStatus.GetString());
-      status.SetError(error);
-      return false;
+      if (arguments.Result.empty()) {
+        std::string errorOutput =
+          cmStrCat("failed to create directory:\n  ", *cdir,
+                   "\nbecause: ", mkdirStatus.GetString());
+        status.SetError(errorOutput);
+        return false;
+      }
+      std::string errorResult = cmStrCat("Failed to create directory: ", *cdir,
+                                         " Error: ", mkdirStatus.GetString());
+      status.GetMakefile().AddDefinition(arguments.Result, errorResult);
+      return true;
     }
+  }
+  if (!arguments.Result.empty()) {
+    status.GetMakefile().AddDefinition(arguments.Result, "0");
   }
   return true;
 }
@@ -903,8 +963,8 @@ bool HandleMakeDirectoryCommand(std::vector<std::string> const& args,
 bool HandleTouchImpl(std::vector<std::string> const& args, bool create,
                      cmExecutionStatus& status)
 {
-  // File command has at least one argument
-  assert(args.size() > 1);
+  // Projects might pass a dynamically generated list of files, and it
+  // could be an empty list. We should not assume there is at least one.
 
   for (std::string const& arg :
        cmMakeRange(args).advance(1)) // Get rid of subcommand
@@ -3918,8 +3978,9 @@ bool HandleChmodRecurseCommand(std::vector<std::string> const& args,
 bool cmFileCommand(std::vector<std::string> const& args,
                    cmExecutionStatus& status)
 {
-  if (args.size() < 2) {
-    status.SetError("must be called with at least two arguments.");
+  if (args.empty()) {
+    status.SetError(
+      "given no arguments, but it requires at least a sub-command.");
     return false;
   }
 
@@ -3956,6 +4017,7 @@ bool cmFileCommand(std::vector<std::string> const& args,
     { "RPATH_CHECK"_s, HandleRPathCheckCommand },
     { "RPATH_REMOVE"_s, HandleRPathRemoveCommand },
     { "READ_ELF"_s, HandleReadElfCommand },
+    { "READ_MACHO"_s, HandleReadMachoCommand },
     { "REAL_PATH"_s, HandleRealPathCommand },
     { "RELATIVE_PATH"_s, HandleRelativePathCommand },
     { "TO_CMAKE_PATH"_s, HandleCMakePathCommand },

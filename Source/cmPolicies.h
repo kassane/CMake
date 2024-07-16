@@ -512,7 +512,22 @@ class cmMakefile;
   SELECT(POLICY, CMP0166,                                                     \
          "TARGET_PROPERTY evaluates link properties transitively over "       \
          "private dependencies of static libraries.",                         \
-         3, 30, 0, cmPolicies::WARN)
+         3, 30, 0, cmPolicies::WARN)                                          \
+  SELECT(POLICY, CMP0167, "The FindBoost module is removed.", 3, 30, 0,       \
+         cmPolicies::WARN)                                                    \
+  SELECT(POLICY, CMP0168,                                                     \
+         "FetchContent implements steps directly instead of through a "       \
+         "sub-build.",                                                        \
+         3, 30, 0, cmPolicies::WARN)                                          \
+  SELECT(POLICY, CMP0169,                                                     \
+         "FetchContent_Populate(depName) single-argument signature is "       \
+         "deprecated.",                                                       \
+         3, 30, 0, cmPolicies::WARN)                                          \
+  SELECT(POLICY, CMP0170,                                                     \
+         "FETCHCONTENT_FULLY_DISCONNECTED requirements are enforced.", 3, 30, \
+         0, cmPolicies::WARN)                                                 \
+  SELECT(POLICY, CMP0171, "'codegen' is a reserved target name.", 3, 31, 0,   \
+         cmPolicies::WARN)
 
 #define CM_SELECT_ID(F, A1, A2, A3, A4, A5, A6) F(A1)
 #define CM_FOR_EACH_POLICY_ID(POLICY)                                         \

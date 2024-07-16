@@ -51,12 +51,24 @@ The :variable:`CMAKE_MINIMUM_REQUIRED_VERSION` variable may also be used
 to determine whether to report an error on use of deprecated macros or
 functions.
 
+Policies Introduced by CMake 3.31
+=================================
+
+.. toctree::
+   :maxdepth: 1
+
+   CMP0171: 'codegen' is a reserved target name. </policy/CMP0171>
+
 Policies Introduced by CMake 3.30
 =================================
 
 .. toctree::
    :maxdepth: 1
 
+   CMP0170: FETCHCONTENT_FULLY_DISCONNECTED requirements are enforced. </policy/CMP0170>
+   CMP0169: FetchContent_Populate(depName) single-argument signature is deprecated. </policy/CMP0169>
+   CMP0168: FetchContent implements steps directly instead of through a sub-build. </policy/CMP0168>
+   CMP0167: The FindBoost module is removed. </policy/CMP0167>
    CMP0166: TARGET_PROPERTY evaluates link properties transitively over private dependencies of static libraries. </policy/CMP0166>
    CMP0165: enable_language() must not be called before project(). </policy/CMP0165>
    CMP0164: add_library() rejects SHARED libraries when not supported by the platform. </policy/CMP0164>

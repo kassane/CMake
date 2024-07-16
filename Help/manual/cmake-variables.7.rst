@@ -467,6 +467,7 @@ Variables that Control the Build
    /variable/CMAKE_LANG_INCLUDE_WHAT_YOU_USE
    /variable/CMAKE_LANG_LINK_GROUP_USING_FEATURE
    /variable/CMAKE_LANG_LINK_GROUP_USING_FEATURE_SUPPORTED
+   /variable/CMAKE_LANG_LINK_LIBRARY_FEATURE_ATTRIBUTES
    /variable/CMAKE_LANG_LINK_LIBRARY_FILE_FLAG
    /variable/CMAKE_LANG_LINK_LIBRARY_FLAG
    /variable/CMAKE_LANG_LINK_LIBRARY_USING_FEATURE
@@ -485,6 +486,7 @@ Variables that Control the Build
    /variable/CMAKE_LINK_GROUP_USING_FEATURE
    /variable/CMAKE_LINK_GROUP_USING_FEATURE_SUPPORTED
    /variable/CMAKE_LINK_INTERFACE_LIBRARIES
+   /variable/CMAKE_LINK_LIBRARY_FEATURE_ATTRIBUTES
    /variable/CMAKE_LINK_LIBRARY_FILE_FLAG
    /variable/CMAKE_LINK_LIBRARY_FLAG
    /variable/CMAKE_LINK_LIBRARY_USING_FEATURE
@@ -588,6 +590,7 @@ Variables for Languages
    /variable/CMAKE_Fortran_MODDIR_FLAG
    /variable/CMAKE_Fortran_MODOUT_FLAG
    /variable/CMAKE_HIP_ARCHITECTURES
+   /variable/CMAKE_HIP_COMPILE_FEATURES
    /variable/CMAKE_HIP_EXTENSIONS
    /variable/CMAKE_HIP_PLATFORM
    /variable/CMAKE_HIP_STANDARD
@@ -674,7 +677,6 @@ Variables for CTest
    /variable/CTEST_CONFIGURE_COMMAND
    /variable/CTEST_COVERAGE_COMMAND
    /variable/CTEST_COVERAGE_EXTRA_FLAGS
-   /variable/CTEST_CURL_OPTIONS
    /variable/CTEST_CUSTOM_COVERAGE_EXCLUDE
    /variable/CTEST_CUSTOM_ERROR_EXCEPTION
    /variable/CTEST_CUSTOM_ERROR_MATCH
@@ -846,6 +848,7 @@ Deprecated Variables for CTest
 .. toctree::
    :maxdepth: 1
 
+   /variable/CTEST_CURL_OPTIONS
    /variable/CTEST_CVS_CHECKOUT
    /variable/CTEST_SCP_COMMAND
    /variable/CTEST_TRIGGER_SITE

@@ -604,6 +604,28 @@ void cmExportFileGenerator::PopulateCompatibleInterfaceProperties(
   }
 }
 
+void cmExportFileGenerator::PopulateCustomTransitiveInterfaceProperties(
+  cmGeneratorTarget const* target,
+  cmGeneratorExpression::PreprocessContext preprocessRule,
+  ImportPropertyMap& properties)
+{
+  this->PopulateInterfaceProperty("TRANSITIVE_COMPILE_PROPERTIES", target,
+                                  properties);
+  this->PopulateInterfaceProperty("TRANSITIVE_LINK_PROPERTIES", target,
+                                  properties);
+  cmGeneratorTarget::CheckLinkLibrariesSuppressionRAII cllSuppressRAII;
+  std::set<std::string> ifaceProperties;
+  for (std::string const& config : this->Configurations) {
+    for (auto const& i : target->GetCustomTransitiveProperties(
+           config, cmGeneratorTarget::PropertyFor::Interface)) {
+      ifaceProperties.emplace(i.second.InterfaceName);
+    }
+  }
+  for (std::string const& ip : ifaceProperties) {
+    this->PopulateInterfaceProperty(ip, target, preprocessRule, properties);
+  }
+}
+
 void cmExportFileGenerator::GenerateInterfaceProperties(
   const cmGeneratorTarget* target, std::ostream& os,
   const ImportPropertyMap& properties)
@@ -988,7 +1010,7 @@ void cmExportFileGenerator::GeneratePolicyHeaderCode(std::ostream& os)
   // Isolate the file policy level.
   // Support CMake versions as far back as the
   // RequiredCMakeVersion{Major,Minor,Patch}, but also support using NEW
-  // policy settings for up to CMake 3.28 (this upper limit may be reviewed
+  // policy settings for up to CMake 3.29 (this upper limit may be reviewed
   // and increased from time to time). This reduces the opportunity for CMake
   // warnings when an older export file is later used with newer CMake
   // versions.
@@ -997,7 +1019,7 @@ void cmExportFileGenerator::GeneratePolicyHeaderCode(std::ostream& os)
      << "cmake_policy(VERSION "
      << this->RequiredCMakeVersionMajor << '.'
      << this->RequiredCMakeVersionMinor << '.'
-     << this->RequiredCMakeVersionPatch << "...3.28)\n";
+     << this->RequiredCMakeVersionPatch << "...3.29)\n";
   /* clang-format on */
 }
 

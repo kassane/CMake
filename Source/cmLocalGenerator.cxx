@@ -717,16 +717,25 @@ void cmLocalGenerator::GenerateInstallRules()
     /* clang-format off */
     fout <<
       "if(CMAKE_INSTALL_COMPONENT)\n"
-      "  set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
+      "  if(CMAKE_INSTALL_COMPONENT MATCHES \"^[a-zA-Z0-9_.+-]+$\")\n"
+      "    set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
       "${CMAKE_INSTALL_COMPONENT}.txt\")\n"
+      "  else()\n"
+      "    string(MD5 CMAKE_INST_COMP_HASH \"${CMAKE_INSTALL_COMPONENT}\")\n"
+      "    set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
+      "${CMAKE_INST_COMP_HASH}.txt\")\n"
+      "    unset(CMAKE_INST_COMP_HASH)\n"
+      "  endif()\n"
       "else()\n"
       "  set(CMAKE_INSTALL_MANIFEST \"install_manifest.txt\")\n"
       "endif()\n"
       "\n"
-      "string(REPLACE \";\" \"\\n\" CMAKE_INSTALL_MANIFEST_CONTENT\n"
+      "if(NOT CMAKE_INSTALL_LOCAL_ONLY)\n"
+      "  string(REPLACE \";\" \"\\n\" CMAKE_INSTALL_MANIFEST_CONTENT\n"
       "       \"${CMAKE_INSTALL_MANIFEST_FILES}\")\n"
-      "file(WRITE \"" << homedir << "/${CMAKE_INSTALL_MANIFEST}\"\n"
-      "     \"${CMAKE_INSTALL_MANIFEST_CONTENT}\")\n";
+      "  file(WRITE \"" << homedir << "/${CMAKE_INSTALL_MANIFEST}\"\n"
+      "     \"${CMAKE_INSTALL_MANIFEST_CONTENT}\")\n"
+      "endif()\n";
     /* clang-format on */
   }
 }
@@ -4360,6 +4369,7 @@ void cmLocalGenerator::GenerateFrameworkInfoPList(
   cmLGInfoProp(mf, target, "MACOSX_FRAMEWORK_ICON_FILE");
   cmLGInfoProp(mf, target, "MACOSX_FRAMEWORK_IDENTIFIER");
   cmLGInfoProp(mf, target, "MACOSX_FRAMEWORK_SHORT_VERSION_STRING");
+  cmLGInfoProp(mf, target, "MACOSX_FRAMEWORK_BUNDLE_NAME");
   cmLGInfoProp(mf, target, "MACOSX_FRAMEWORK_BUNDLE_VERSION");
   mf->ConfigureFile(inFile, fname, false, false, false);
 }
@@ -4396,7 +4406,12 @@ void CreateGeneratedSource(cmLocalGenerator& lg, const std::string& output,
   }
 
   // Make sure the output file name has no invalid characters.
-  std::string::size_type pos = output.find_first_of("#<>");
+  const bool hashNotAllowed = lg.GetState()->UseBorlandMake();
+  std::string::size_type pos = output.find_first_of("<>");
+  if (pos == std::string::npos && hashNotAllowed) {
+    pos = output.find_first_of('#');
+  }
+
   if (pos != std::string::npos) {
     lg.GetCMakeInstance()->IssueMessage(
       MessageType::FATAL_ERROR,
@@ -4611,6 +4626,12 @@ void AppendCustomCommandToOutput(cmLocalGenerator& lg,
     if (cmCustomCommand* cc = sf->GetCustomCommand()) {
       cc->AppendCommands(commandLines);
       cc->AppendDepends(depends);
+      if (cc->GetCodegen() && !implicit_depends.empty()) {
+        lg.GetCMakeInstance()->IssueMessage(
+          MessageType::FATAL_ERROR,
+          "Cannot append IMPLICIT_DEPENDS to existing CODEGEN custom "
+          "command.");
+      }
       cc->AppendImplicitDepends(implicit_depends);
       return;
     }

@@ -505,12 +505,6 @@ public:
                          const std::vector<std::string>& files,
                          cmTarExtractTimestamps extractTimestamps,
                          bool verbose);
-  // This should be called first thing in main
-  // it will keep child processes from inheriting the
-  // stdin and stdout of this process.  This is important
-  // if you want to be able to kill child processes and
-  // not get stuck waiting for all the output on the pipes.
-  static void DoNotInheritStdPipes();
 
   static void EnsureStdPipes();
 
@@ -529,6 +523,10 @@ public:
   static std::string const& GetCMClDepsCommand();
   static std::string const& GetCMakeRoot();
   static std::string const& GetHTMLDoc();
+
+  /** Get the CMake config directory **/
+  static cm::optional<std::string> GetSystemConfigDirectory();
+  static cm::optional<std::string> GetCMakeConfigDirectory();
 
   /** Get the CWD mapped through the KWSys translation map.  */
   static std::string GetCurrentWorkingDirectory();

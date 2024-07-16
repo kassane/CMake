@@ -488,7 +488,7 @@ protected:
       cmGeneratorExpressionDAGChecker dagChecker(
         context->Backtrace, context->HeadTarget,
         genexOperator + ":" + expression, content, dagCheckerParent,
-        context->LG);
+        context->LG, context->Config);
       switch (dagChecker.Check()) {
         case cmGeneratorExpressionDAGChecker::SELF_REFERENCE:
         case cmGeneratorExpressionDAGChecker::CYCLIC_REFERENCE: {
@@ -2013,6 +2013,76 @@ static const CompilerVersionNode cCompilerVersionNode("C"),
   fortranCompilerVersionNode("Fortran"), ispcCompilerVersionNode("ISPC"),
   hipCompilerVersionNode("HIP");
 
+struct CompilerFrontendVariantNode : public cmGeneratorExpressionNode
+{
+  CompilerFrontendVariantNode(const char* compilerLang)
+    : CompilerLanguage(compilerLang)
+  {
+  }
+
+  int NumExpectedParameters() const override { return ZeroOrMoreParameters; }
+
+  std::string Evaluate(
+    const std::vector<std::string>& parameters,
+    cmGeneratorExpressionContext* context,
+    const GeneratorExpressionContent* content,
+    cmGeneratorExpressionDAGChecker* dagChecker) const override
+  {
+    if (!context->HeadTarget) {
+      std::ostringstream e;
+      e << "$<" << this->CompilerLanguage
+        << "_COMPILER_FRONTEND_VARIANT> may only be used with binary targets. "
+           " It may not be used with add_custom_command or add_custom_target.";
+      reportError(context, content->GetOriginalExpression(), e.str());
+      return {};
+    }
+    return this->EvaluateWithLanguage(parameters, context, content, dagChecker,
+                                      this->CompilerLanguage);
+  }
+
+  std::string EvaluateWithLanguage(const std::vector<std::string>& parameters,
+                                   cmGeneratorExpressionContext* context,
+                                   const GeneratorExpressionContent* content,
+                                   cmGeneratorExpressionDAGChecker* /*unused*/,
+                                   const std::string& lang) const
+  {
+    std::string const& compilerFrontendVariant =
+      context->LG->GetMakefile()->GetSafeDefinition(
+        "CMAKE_" + lang + "_COMPILER_FRONTEND_VARIANT");
+    if (parameters.empty()) {
+      return compilerFrontendVariant;
+    }
+    if (compilerFrontendVariant.empty()) {
+      return parameters.front().empty() ? "1" : "0";
+    }
+    static cmsys::RegularExpression compilerFrontendVariantValidator(
+      "^[A-Za-z0-9_]*$");
+
+    for (auto const& param : parameters) {
+      if (!compilerFrontendVariantValidator.find(param)) {
+        reportError(context, content->GetOriginalExpression(),
+                    "Expression syntax not recognized.");
+        return {};
+      }
+      if (strcmp(param.c_str(), compilerFrontendVariant.c_str()) == 0) {
+        return "1";
+      }
+    }
+    return "0";
+  }
+
+  const char* const CompilerLanguage;
+};
+
+static const CompilerFrontendVariantNode cCompilerFrontendVariantNode("C"),
+  cxxCompilerFrontendVariantNode("CXX"),
+  cudaCompilerFrontendVariantNode("CUDA"),
+  objcCompilerFrontendVariantNode("OBJC"),
+  objcxxCompilerFrontendVariantNode("OBJCXX"),
+  fortranCompilerFrontendVariantNode("Fortran"),
+  hipCompilerFrontendVariantNode("HIP"),
+  ispcCompilerFrontendVariantNode("ISPC");
+
 struct PlatformIdNode : public cmGeneratorExpressionNode
 {
   PlatformIdNode() {} // NOLINT(modernize-use-equals-default)
@@ -2701,13 +2771,12 @@ static const struct DeviceLinkNode : public cmGeneratorExpressionNode
 static std::string getLinkedTargetsContent(
   cmGeneratorTarget const* target, std::string const& prop,
   cmGeneratorExpressionContext* context,
-  cmGeneratorExpressionDAGChecker* dagChecker,
-  cmGeneratorTarget::LinkInterfaceFor interfaceFor)
+  cmGeneratorExpressionDAGChecker* dagChecker, cmGeneratorTarget::UseTo usage)
 {
   std::string result;
   if (cmLinkImplementationLibraries const* impl =
         target->GetLinkImplementationLibraries(
-          context->Config, cmGeneratorTarget::LinkInterfaceFor::Usage)) {
+          context->Config, cmGeneratorTarget::UseTo::Compile)) {
     for (cmLinkImplItem const& lib : impl->Libraries) {
       if (lib.Target) {
         // Pretend $<TARGET_PROPERTY:lib.Target,prop> appeared in our
@@ -2718,7 +2787,7 @@ static std::string getLinkedTargetsContent(
           target, context->EvaluateForBuildsystem, lib.Backtrace,
           context->Language);
         std::string libResult = lib.Target->EvaluateInterfaceProperty(
-          prop, &libContext, dagChecker, interfaceFor);
+          prop, &libContext, dagChecker, usage);
         if (!libResult.empty()) {
           if (result.empty()) {
             result = std::move(libResult);
@@ -2874,19 +2943,21 @@ static const struct TargetPropertyNode : public cmGeneratorExpressionNode
       return target->GetLinkerLanguage(context->Config);
     }
 
+    bool const evaluatingLinkLibraries =
+      dagCheckerParent && dagCheckerParent->EvaluatingLinkLibraries();
+
     std::string interfacePropertyName;
     bool isInterfaceProperty = false;
-    cmGeneratorTarget::LinkInterfaceFor interfaceFor =
-      cmGeneratorTarget::LinkInterfaceFor::Usage;
+    cmGeneratorTarget::UseTo usage = cmGeneratorTarget::UseTo::Compile;
 
     if (cm::optional<cmGeneratorTarget::TransitiveProperty> transitiveProp =
-          target->IsTransitiveProperty(propertyName, context->LG)) {
+          target->IsTransitiveProperty(propertyName, context->LG,
+                                       context->Config,
+                                       evaluatingLinkLibraries)) {
       interfacePropertyName = std::string(transitiveProp->InterfaceName);
       isInterfaceProperty = transitiveProp->InterfaceName == propertyName;
-      interfaceFor = transitiveProp->InterfaceFor;
+      usage = transitiveProp->Usage;
     }
-
-    bool evaluatingLinkLibraries = false;
 
     if (dagCheckerParent) {
       // This $<TARGET_PROPERTY:...> node has been reached while evaluating
@@ -2896,8 +2967,7 @@ static const struct TargetPropertyNode : public cmGeneratorExpressionNode
           dagCheckerParent->EvaluatingPICExpression() ||
           dagCheckerParent->EvaluatingLinkerLauncher()) {
         // No check required.
-      } else if (dagCheckerParent->EvaluatingLinkLibraries()) {
-        evaluatingLinkLibraries = true;
+      } else if (evaluatingLinkLibraries) {
         if (!interfacePropertyName.empty()) {
           reportError(
             context, content->GetOriginalExpression(),
@@ -2914,12 +2984,12 @@ static const struct TargetPropertyNode : public cmGeneratorExpressionNode
     if (isInterfaceProperty) {
       return cmGeneratorExpression::StripEmptyListElements(
         target->EvaluateInterfaceProperty(propertyName, context,
-                                          dagCheckerParent, interfaceFor));
+                                          dagCheckerParent, usage));
     }
 
-    cmGeneratorExpressionDAGChecker dagChecker(context->Backtrace, target,
-                                               propertyName, content,
-                                               dagCheckerParent, context->LG);
+    cmGeneratorExpressionDAGChecker dagChecker(
+      context->Backtrace, target, propertyName, content, dagCheckerParent,
+      context->LG, context->Config);
 
     switch (dagChecker.Check()) {
       case cmGeneratorExpressionDAGChecker::SELF_REFERENCE:
@@ -3001,7 +3071,7 @@ static const struct TargetPropertyNode : public cmGeneratorExpressionNode
         this->EvaluateDependentExpression(result, context->LG, context, target,
                                           &dagChecker, target));
       std::string linkedTargetsContent = getLinkedTargetsContent(
-        target, interfacePropertyName, context, &dagChecker, interfaceFor);
+        target, interfacePropertyName, context, &dagChecker, usage);
       if (!linkedTargetsContent.empty()) {
         result += (result.empty() ? "" : ";") + linkedTargetsContent;
       }
@@ -4449,6 +4519,14 @@ const cmGeneratorExpressionNode* cmGeneratorExpressionNode::GetNode(
     { "OBJCXX_COMPILER_VERSION", &objcxxCompilerVersionNode },
     { "Fortran_COMPILER_VERSION", &fortranCompilerVersionNode },
     { "HIP_COMPILER_VERSION", &hipCompilerVersionNode },
+    { "C_COMPILER_FRONTEND_VARIANT", &cCompilerFrontendVariantNode },
+    { "CXX_COMPILER_FRONTEND_VARIANT", &cxxCompilerFrontendVariantNode },
+    { "CUDA_COMPILER_FRONTEND_VARIANT", &cudaCompilerFrontendVariantNode },
+    { "OBJC_COMPILER_FRONTEND_VARIANT", &objcCompilerFrontendVariantNode },
+    { "OBJCXX_COMPILER_FRONTEND_VARIANT", &objcxxCompilerFrontendVariantNode },
+    { "Fortran_COMPILER_FRONTEND_VARIANT",
+      &fortranCompilerFrontendVariantNode },
+    { "HIP_COMPILER_FRONTEND_VARIANT", &hipCompilerFrontendVariantNode },
     { "PLATFORM_ID", &platformIdNode },
     { "COMPILE_FEATURES", &compileFeaturesNode },
     { "CONFIGURATION", &configurationNode },

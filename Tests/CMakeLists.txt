@@ -1,5 +1,13 @@
-# a macro for tests that have a simple format where the name matches the
-# directory and project
+# Creates a test named <NAME> that runs ctest --build-and-test on the
+# subdirectory of this one named by replacing "." with "/" in
+# <NAME>. Any arguments following NAME are passed to ctest as a
+# --test-command.  See the implementation for additional details.
+#
+# The subdirectory is added to TEST_BUILD_DIRS in the caller's scope.
+#
+# Requires: the name of the project in the subdirectory is the part of
+# <NAME> following the last dot ("."), or all of <NAME> if there is no
+# "." in <NAME>.
 macro(ADD_TEST_MACRO NAME)
   if(${ARGC} GREATER 1)
     set(_test_command --test-command ${ARGN})
@@ -40,9 +48,7 @@ set(ENV{HOME} \"${TEST_HOME}\")
 endif()
 
 # Suppress generator deprecation warnings in test suite.
-if(CMAKE_GENERATOR MATCHES "^Visual Studio 9 2008")
-  set(TEST_WARN_VS_CODE "set(ENV{CMAKE_WARN_VS9} OFF)")
-elseif(CMAKE_GENERATOR MATCHES "^Visual Studio 12 2013")
+if(CMAKE_GENERATOR MATCHES "^Visual Studio 12 2013")
   set(TEST_WARN_VS_CODE "set(ENV{CMAKE_WARN_VS12} OFF)")
 else()
   set(TEST_WARN_VS_CODE "")
@@ -74,9 +80,6 @@ if(BUILD_TESTING)
   set(CMake_TEST_DEVENV "")
   if(CMAKE_VS_DEVENV_COMMAND)
     set(CMake_TEST_DEVENV "${CMAKE_VS_DEVENV_COMMAND}")
-  elseif(CMAKE_GENERATOR MATCHES "Visual Studio 9 " AND
-      NOT CMAKE_MAKE_PROGRAM MATCHES "[mM][sS][bB][uU][iI][lL][dD]\\.[eE][xX][eE]")
-    set(CMake_TEST_DEVENV "${CMAKE_MAKE_PROGRAM}")
   endif()
 
   if(CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
@@ -172,10 +175,7 @@ if(BUILD_TESTING)
     set(CPACK_BINARY_DEB OFF)
   endif()
 
-  # Look for NuGet to use for tests.
-  find_program(NUGET_EXECUTABLE NAMES NuGet nuget)
-
-  if(NUGET_EXECUTABLE)
+  if(CMake_TEST_CPACK_NUGET)
     set(CPACK_BINARY_NUGET ON)
   else()
     set(CPACK_BINARY_NUGET OFF)
@@ -391,14 +391,17 @@ if(BUILD_TESTING)
   string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_C "${CMake_TEST_C_STANDARDS}")
   string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_CXX "${CMake_TEST_CXX_STANDARDS}")
   string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_CUDA "${CMake_TEST_CUDA_STANDARDS}")
+  string(REPLACE ";" "$<SEMICOLON>" TEST_STDS_HIP "${CMake_TEST_HIP_STANDARDS}")
   set(CompileFeatures_BUILD_OPTIONS
     -DCMake_TEST_C_STANDARDS=${TEST_STDS_C}
     -DCMake_TEST_CXX_STANDARDS=${TEST_STDS_CXX}
     -DCMake_TEST_CUDA=${CMake_TEST_CUDA}
     -DCMake_TEST_CUDA_STANDARDS=${TEST_STDS_CUDA}
+    -DCMake_TEST_HIP=${CMake_TEST_HIP}
+    -DCMake_TEST_HIP_STANDARDS=${TEST_STDS_HIP}
     )
   ADD_TEST_MACRO(CompileFeatures CompileFeatures)
-  set_property(TEST CompileFeatures APPEND PROPERTY LABELS "CUDA")
+  set_property(TEST CompileFeatures APPEND PROPERTY LABELS "CUDA" "HIP")
 
   ADD_TEST_MACRO(CMakeCommands.target_compile_features)
 
@@ -472,7 +475,7 @@ if(BUILD_TESTING)
     add_subdirectory(ObjCXX)
   endif()
 
-  if(${CMAKE_GENERATOR} MATCHES "Visual Studio ([^9]|[9][0-9])")
+  if(${CMAKE_GENERATOR} MATCHES "Visual Studio")
     ADD_TEST_MACRO(CSharpOnly CSharpOnly)
     if(NOT CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64")
       ADD_TEST_MACRO(CSharpLinkToCxx CSharpLinkToCxx)
@@ -535,6 +538,7 @@ if(BUILD_TESTING)
   set_property(TEST CompileOptions APPEND PROPERTY LABELS "Fortran")
 
   ADD_TEST_MACRO(CompatibleInterface CompatibleInterface)
+  ADD_TEST_MACRO(CustomTransitiveProperties CustomTransitiveProperties)
   ADD_TEST_MACRO(AliasTarget AliasTarget)
   ADD_TEST_MACRO(StagingPrefix StagingPrefix)
   ADD_TEST_MACRO(ImportedSameName ImportedSameName)
@@ -1120,9 +1124,7 @@ if(BUILD_TESTING)
     if(CPACK_BINARY_DEB)
       list(APPEND ACTIVE_CPACK_GENERATORS DEB)
     endif()
-    # Check whether if NuGet command is found
-    # before adding NuGet tests
-    if(CPACK_BINARY_NUGET)
+    if(CMake_TEST_CPACK_NUGET)
       list(APPEND ACTIVE_CPACK_GENERATORS NUGET)
       set(CPACK_GENERATOR_STRING_NUGET NuGet)
     endif()
@@ -1197,13 +1199,17 @@ if(BUILD_TESTING)
         else()
           unset(SHLIBDEPS_EXECUTABLE_VERSION)
         endif()
+        # Check if distro has symbols or shlibs data
+        file(GLOB SHLIBS_FILES_EXIST "/var/lib/dpkg/info/*.shlibs" "/var/lib/dpkg/info/*.symbols")
         if(NOT SHLIBDEPS_EXECUTABLE_VERSION VERSION_LESS 1.19 OR
           (NOT SHLIBDEPS_EXECUTABLE_VERSION VERSION_LESS 1.17 AND NOT CMAKE_BINARY_DIR MATCHES ".*[ ].*"))
             list(APPEND DEB_CONFIGURATIONS_TO_TEST "shlibdeps-with-private-lib-failure"
-                                                   "shlibdeps-with-private-lib-success")
+                                                   "shlibdeps-with-private-lib-success"
+                                                   "shlibdeps-with-ORIGIN-RPATH-failure")
+            if(SHLIBS_FILES_EXIST)
+                list(APPEND DEB_CONFIGURATIONS_TO_TEST "shlibdeps-with-ORIGIN-RPATH-success")
+            endif()
         endif()
-        # Check if distro has symbols or shlibs data
-        file(GLOB SHLIBS_FILES_EXIST "/var/lib/dpkg/info/*.shlibs" "/var/lib/dpkg/info/*.symbols")
         if(SHLIBS_FILES_EXIST)
           list(APPEND DEB_CONFIGURATIONS_TO_TEST "components-depend2")
         endif()
@@ -1546,7 +1552,7 @@ if(BUILD_TESTING)
     set(CMake_TEST_FindPython2 TRUE)
     set(CMake_TEST_FindPython3 TRUE)
   endif()
-  if(CMake_TEST_FindPython_SABIMOdule)
+  if(CMake_TEST_FindPython_SABIModule)
     set(CMake_TEST_FindPython2_SABIModule TRUE)
     set(CMake_TEST_FindPython3_SABIModule TRUE)
   endif()
@@ -2209,8 +2215,6 @@ if(BUILD_TESTING)
   endif()
 
   if(MSVC AND NOT MSVC_VERSION LESS 1310
-     AND (NOT CMAKE_GENERATOR MATCHES "Visual Studio 9 "
-          OR CMAKE_SIZEOF_VOID_P EQUAL 4)
      AND (NOT CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
       )
     ADD_TEST_MACRO(VSMASM VSMASM)
@@ -2221,8 +2225,7 @@ if(BUILD_TESTING)
       ADD_TEST_MACRO(SBCS SBCS)
     endif()
 
-    if(NOT "${CMAKE_GENERATOR}" MATCHES "Visual Studio 9 "
-        AND NOT CMAKE_GENERATOR_TOOLSET STREQUAL "v90"
+    if(NOT CMAKE_GENERATOR_TOOLSET STREQUAL "v90"
         AND NOT CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64")
       ADD_TEST_MACRO(VSWindowsFormsResx VSWindowsFormsResx)
       ADD_TEST_MACRO(VSManagedCustomCommand)
@@ -2373,7 +2376,7 @@ if(BUILD_TESTING)
     endif()
   endif()
 
-  if(CMAKE_GENERATOR MATCHES "Visual Studio ([^9]|9[0-9])" AND nasm)
+  if(CMAKE_GENERATOR MATCHES "Visual Studio" AND nasm)
     ADD_TEST_MACRO(VSNASM VSNASM)
   endif()
 

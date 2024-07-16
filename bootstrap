@@ -353,6 +353,7 @@ CMAKE_CXX_SOURCES="\
   cmExprParserHelper \
   cmExternalMakefileProjectGenerator \
   cmFileCommand \
+  cmFileCommand_ReadMacho \
   cmFileCopier \
   cmFileInstaller \
   cmFileSet \
@@ -381,6 +382,14 @@ CMAKE_CXX_SOURCES="\
   cmGeneratorExpressionNode \
   cmGeneratorExpressionParser \
   cmGeneratorTarget \
+  cmGeneratorTarget_CompatibleInterface \
+  cmGeneratorTarget_IncludeDirectories \
+  cmGeneratorTarget_Link \
+  cmGeneratorTarget_LinkDirectories \
+  cmGeneratorTarget_Options \
+  cmGeneratorTarget_Sources \
+  cmGeneratorTarget_TargetPropertyEntry \
+  cmGeneratorTarget_TransitiveProperty \
   cmGetCMakePropertyCommand \
   cmGetDirectoryPropertyCommand \
   cmGetFilenameComponentCommand \
@@ -492,6 +501,7 @@ CMAKE_CXX_SOURCES="\
   cmTargetPropCommandBase \
   cmTargetPropertyComputer \
   cmTargetSourcesCommand \
+  cmTargetTraceDependencies \
   cmTest \
   cmTestGenerator \
   cmTimestamp \
@@ -511,6 +521,12 @@ CMAKE_CXX_SOURCES="\
   cmcmd  \
   cm_fileno \
 "
+
+if ${cmake_system_darwin}; then
+  CMAKE_CXX_SOURCES="${CMAKE_CXX_SOURCES}\
+    cmMachO \
+  "
+fi
 
 if ${cmake_system_mingw}; then
   CMAKE_CXX_SOURCES="${CMAKE_CXX_SOURCES}\
@@ -684,8 +700,8 @@ Configuration:
                           (default)
   --system-cppdap         use system-installed cppdap library
   --no-system-cppdap      use cmake-provided cppdap library (default)
-  --system-curl           use system-installed curl library
-  --no-system-curl        use cmake-provided curl library (default)
+  --system-curl           use system-installed curl library (default on macOS)
+  --no-system-curl        use cmake-provided curl library (default elsewhere)
   --system-expat          use system-installed expat library
   --no-system-expat       use cmake-provided expat library (default)
   --system-jsoncpp        use system-installed jsoncpp library
@@ -1660,6 +1676,10 @@ else
   cmake_report cmConfigure.h${_tmp} "#define CMAKE_BOOTSTRAP_MAKEFILES"
 fi
 
+if ${cmake_system_darwin}; then
+  cmake_report cmConfigure.h${_tmp} "#define CMake_USE_MACH_PARSER"
+fi
+
 if ${cmake_system_mingw}; then
   cmake_report cmConfigure.h${_tmp} "#if defined(_WIN32) && !defined(NOMINMAX)"
   cmake_report cmConfigure.h${_tmp} "#  define NOMINMAX"
@@ -1743,7 +1763,7 @@ libs=""
 uv_c_flags=""
 if ${cmake_system_mingw}; then
   uv_c_flags="${uv_c_flags} -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600"
-  libs="${libs} -lws2_32 -lpsapi -liphlpapi -lshell32 -luserenv -lole32 -loleaut32"
+  libs="${libs} -lws2_32 -lpsapi -liphlpapi -lshell32 -luserenv -lole32 -loleaut32 -luuid"
 else
   case "${cmake_system}" in
     *AIX*)
