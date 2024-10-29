@@ -250,7 +250,7 @@ struct UsageRequirementProperty
 
   void CopyFromEntries(cmBTStringRange entries)
   {
-    return cm::append(this->Entries, entries);
+    cm::append(this->Entries, entries);
   }
 
   enum class Action
@@ -354,6 +354,8 @@ struct TargetProperty
   }
 
   cm::static_string_view const Name;
+  // Explicit initialization is needed for AppleClang in Xcode 8 and below
+  // NOLINTNEXTLINE(readability-redundant-member-init)
   cm::optional<cm::static_string_view> const Default = {};
   InitCondition const InitConditional = InitCondition::Always;
   Repetition const Repeat = Repetition::Once;
@@ -407,6 +409,8 @@ TargetProperty const StaticTargetProperties[] = {
   { "VS_USE_DEBUG_LIBRARIES"_s, IC::NonImportedTarget },
   // ---- OpenWatcom
   { "WATCOM_RUNTIME_LIBRARY"_s, IC::CanCompileSources },
+  // ---- AIX
+  { "AIX_SHARED_LIBRARY_ARCHIVE"_s, IC::SharedLibraryTarget },
   // -- Language
   // ---- C
   COMMON_LANGUAGE_PROPERTIES(C),
@@ -464,6 +468,7 @@ TargetProperty const StaticTargetProperties[] = {
   { "LINKER_TYPE"_s, IC::CanCompileSources },
   { "ENABLE_EXPORTS"_s, IC::TargetWithSymbolExports },
   { "LINK_LIBRARIES_ONLY_TARGETS"_s, IC::NormalNonImportedTarget },
+  { "LINK_LIBRARIES_STRATEGY"_s, IC::NormalNonImportedTarget },
   { "LINK_SEARCH_START_STATIC"_s, IC::CanCompileSources },
   { "LINK_SEARCH_END_STATIC"_s, IC::CanCompileSources },
   // Initialize per-configuration name postfix property from the variable only
@@ -548,6 +553,7 @@ TargetProperty const StaticTargetProperties[] = {
   { "UNITY_BUILD_UNIQUE_ID"_s, IC::CanCompileSources },
   { "UNITY_BUILD_BATCH_SIZE"_s, "8"_s, IC::CanCompileSources },
   { "UNITY_BUILD_MODE"_s, "BATCH"_s, IC::CanCompileSources },
+  { "UNITY_BUILD_RELOCATABLE"_s, IC::CanCompileSources },
   { "OPTIMIZE_DEPENDENCIES"_s, IC::CanCompileSources },
   { "VERIFY_INTERFACE_HEADER_SETS"_s },
   // -- Android
@@ -596,6 +602,7 @@ TargetProperty const StaticTargetProperties[] = {
 
   // Metadata
   { "CROSSCOMPILING_EMULATOR"_s, IC::ExecutableTarget },
+  { "EXPORT_BUILD_DATABASE"_s, IC::CanCompileSources },
   { "EXPORT_COMPILE_COMMANDS"_s, IC::CanCompileSources },
   { "FOLDER"_s },
   { "TEST_LAUNCHER"_s, IC::ExecutableTarget },
@@ -643,6 +650,7 @@ public:
   cmStateEnums::TargetType TargetType;
   cmMakefile* Makefile;
   cmPolicies::PolicyMap PolicyMap;
+  cmTarget const* TemplateTarget;
   std::string Name;
   std::string InstallPath;
   std::string RuntimeInstallPath;
@@ -929,6 +937,7 @@ cmTarget::cmTarget(std::string const& name, cmStateEnums::TargetType type,
   this->impl->TargetType = type;
   this->impl->Makefile = mf;
   this->impl->Name = name;
+  this->impl->TemplateTarget = nullptr;
   this->impl->IsGeneratorProvided = false;
   this->impl->HaveInstallRule = false;
   this->impl->IsDLLPlatform = false;
@@ -1184,6 +1193,14 @@ const std::string& cmTarget::GetName() const
   return this->impl->Name;
 }
 
+const std::string& cmTarget::GetTemplateName() const
+{
+  if (this->impl->TemplateTarget) {
+    return this->impl->TemplateTarget->GetTemplateName();
+  }
+  return this->impl->Name;
+}
+
 cmPolicies::PolicyStatus cmTarget::GetPolicyStatus(
   cmPolicies::PolicyID policy) const
 {
@@ -1282,6 +1299,12 @@ bool cmTarget::IsFrameworkOnApple() const
   return ((this->GetType() == cmStateEnums::SHARED_LIBRARY ||
            this->GetType() == cmStateEnums::STATIC_LIBRARY) &&
           this->IsApple() && this->GetPropertyAsBool("FRAMEWORK"));
+}
+
+bool cmTarget::IsArchivedAIXSharedLibrary() const
+{
+  return (this->GetType() == cmStateEnums::SHARED_LIBRARY && this->IsAIX() &&
+          this->GetPropertyAsBool("AIX_SHARED_LIBRARY_ARCHIVE"));
 }
 
 bool cmTarget::IsAppBundleOnApple() const
@@ -1776,6 +1799,7 @@ void cmTarget::CopyPolicyStatuses(cmTarget const* tgt)
   assert(tgt->IsImported());
 
   this->impl->PolicyMap = tgt->impl->PolicyMap;
+  this->impl->TemplateTarget = tgt;
 }
 
 void cmTarget::CopyImportedCxxModulesEntries(cmTarget const* tgt)
@@ -1876,6 +1900,10 @@ void cmTarget::CopyImportedCxxModulesProperties(cmTarget const* tgt)
     // Metadata
     "EchoString",
     "EXPORT_COMPILE_COMMANDS",
+    // Do *not* copy this property; it should be re-initialized at synthesis
+    // time from the `CMAKE_EXPORT_BUILD_DATABASE` variable as `IMPORTED`
+    // targets ignore the property initialization.
+    // "EXPORT_BUILD_DATABASE",
     "FOLDER",
     "LABELS",
     "PROJECT_LABEL",
@@ -2022,10 +2050,13 @@ struct ReadOnlyProperty
 {
   ReadOnlyProperty(ReadOnlyCondition cond)
     : Condition{ cond }
-    , Policy{} {};
+  {
+  }
   ReadOnlyProperty(ReadOnlyCondition cond, cmPolicies::PolicyID id)
     : Condition{ cond }
-    , Policy{ id } {};
+    , Policy{ id }
+  {
+  }
 
   ReadOnlyCondition Condition;
   cm::optional<cmPolicies::PolicyID> Policy;
@@ -2997,7 +3028,9 @@ const char* cmTarget::GetSuffixVariableInternal(
     case cmStateEnums::SHARED_LIBRARY:
       switch (artifact) {
         case cmStateEnums::RuntimeBinaryArtifact:
-          return "CMAKE_SHARED_LIBRARY_SUFFIX";
+          return this->IsArchivedAIXSharedLibrary()
+            ? "CMAKE_SHARED_LIBRARY_ARCHIVE_SUFFIX"
+            : "CMAKE_SHARED_LIBRARY_SUFFIX";
         case cmStateEnums::ImportLibraryArtifact:
           return this->IsApple() ? "CMAKE_APPLE_IMPORT_FILE_SUFFIX"
                                  : "CMAKE_IMPORT_LIBRARY_SUFFIX";

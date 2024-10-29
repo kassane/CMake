@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <cstring>
 #include <sstream>
 
 #include <cm/string_view>
@@ -190,9 +189,7 @@ bool cmCTestHandlerCommand::InitialPass(std::vector<std::string> const& args,
   cmWorkingDirectory workdir(
     this->CTest->GetCTestConfiguration("BuildDirectory"));
   if (workdir.Failed()) {
-    this->SetError("failed to change directory to " +
-                   this->CTest->GetCTestConfiguration("BuildDirectory") +
-                   " : " + std::strerror(workdir.GetLastResult()));
+    this->SetError(workdir.GetError());
     if (captureCMakeError) {
       this->Makefile->AddDefinition(this->CaptureCMakeError, "-1");
       cmCTestLog(this->CTest, ERROR_MESSAGE,
@@ -202,6 +199,9 @@ bool cmCTestHandlerCommand::InitialPass(std::vector<std::string> const& args,
     }
     return false;
   }
+
+  // reread time limit, as the variable may have been modified.
+  this->CTest->SetTimeLimit(this->Makefile->GetDefinition("CTEST_TIME_LIMIT"));
 
   int res = handler->ProcessHandler();
   if (!this->ReturnValue.empty()) {
@@ -224,10 +224,6 @@ bool cmCTestHandlerCommand::InitialPass(std::vector<std::string> const& args,
     this->Makefile->AddDefinition(this->CaptureCMakeError, returnString);
   }
   return true;
-}
-
-void cmCTestHandlerCommand::ProcessAdditionalValues(cmCTestGenericHandler*)
-{
 }
 
 void cmCTestHandlerCommand::BindArguments()

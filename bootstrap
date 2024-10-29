@@ -306,6 +306,7 @@ CMAKE_CXX_SOURCES="\
   cmBlockCommand \
   cmBreakCommand \
   cmBuildCommand \
+  cmBuildDatabase \
   cmCMakeLanguageCommand \
   cmCMakeMinimumRequired \
   cmList \
@@ -345,8 +346,11 @@ CMAKE_CXX_SOURCES="\
   cmExecuteProcessCommand \
   cmExpandedCommandArgument \
   cmExperimental \
+  cmExportBuildCMakeConfigGenerator \
   cmExportBuildFileGenerator \
+  cmExportCMakeConfigGenerator \
   cmExportFileGenerator \
+  cmExportInstallCMakeConfigGenerator \
   cmExportInstallFileGenerator \
   cmExportSet \
   cmExportTryCompileFileGenerator \
@@ -408,6 +412,7 @@ CMAKE_CXX_SOURCES="\
   cmIncludeGuardCommand \
   cmIncludeDirectoryCommand \
   cmIncludeRegularExpressionCommand \
+  cmInstallCMakeConfigExportGenerator \
   cmInstallCommand \
   cmInstallCommandArguments \
   cmInstallCxxModuleBmiGenerator \
@@ -1811,7 +1816,7 @@ else
     cmake_c_flags="${cmake_c_flags} ${use_uv_flags}"
     cmake_cxx_flags="${cmake_cxx_flags} ${use_uv_flags}"
   else
-    use_librhash_ldflags="-luv"
+    use_uv_ldflags="-luv"
   fi
   libs="${libs} ${use_uv_ldflags}"
 fi
@@ -1838,7 +1843,7 @@ else
     use_jsoncpp_ldflags="`pkg-config --libs jsoncpp`"
     cmake_cxx_flags="${cmake_cxx_flags} ${use_jsoncpp_flags}"
   else
-    use_librhash_ldflags="-ljsoncpp"
+    use_jsoncpp_ldflags="-ljsoncpp"
   fi
   libs="${libs} ${use_jsoncpp_ldflags}"
 fi

@@ -32,7 +32,9 @@
 #include "cmCryptoHash.h"
 #include "cmCustomCommand.h"
 #include "cmCustomCommandLines.h"
+#include "cmCustomCommandTypes.h"
 #include "cmDuration.h"
+#include "cmExperimental.h"
 #include "cmExportBuildFileGenerator.h"
 #include "cmExternalMakefileProjectGenerator.h"
 #include "cmGeneratedFileStream.h"
@@ -67,6 +69,8 @@
 
 #  include "cmQtAutoGenGlobalInitializer.h"
 #endif
+
+class cmListFileBacktrace;
 
 const std::string kCMAKE_PLATFORM_INFO_INITIALIZED =
   "CMAKE_PLATFORM_INFO_INITIALIZED";
@@ -135,6 +139,13 @@ cmGlobalGenerator::cmGlobalGenerator(cmake* cm)
   cm->GetState()->SetWatcomWMake(false);
   cm->GetState()->SetWindowsShell(false);
   cm->GetState()->SetWindowsVSIDE(false);
+
+#if !defined(CMAKE_BOOTSTRAP)
+  Json::StreamWriterBuilder wbuilder;
+  wbuilder["indentation"] = "\t";
+  this->JsonWriter =
+    std::unique_ptr<Json::StreamWriter>(wbuilder.newStreamWriter());
+#endif
 }
 
 cmGlobalGenerator::~cmGlobalGenerator()
@@ -523,6 +534,9 @@ bool cmGlobalGenerator::CheckLanguages(
 //   CMakeTest(LANG)Compiler.cmake
 //     - Make sure the compiler works with a try compile if
 //       CMakeDetermine(LANG) was loaded
+//
+//   CMake(LANG)LinkerInformation.cmake
+//     - loads Platform/Linker/${CMAKE_SYSTEM_NAME}-${LINKER}.cmake
 //
 // Now load a few files that can override values set in any of the above
 // (PROJECTNAME)Compatibility.cmake
@@ -948,6 +962,28 @@ void cmGlobalGenerator::EnableLanguage(
         }
       } // end if in try compile
     }   // end need test language
+
+    // load linker configuration,  if required
+    if (mf->GetDefinition(cmStrCat("CMAKE_", lang, "_USE_LINKER_INFORMATION"))
+          .IsOn()) {
+      std::string langLinkerLoadedVar =
+        cmStrCat("CMAKE_", lang, "_LINKER_INFORMATION_LOADED");
+      if (!mf->GetDefinition(langLinkerLoadedVar)) {
+        fpath = cmStrCat("CMake", lang, "LinkerInformation.cmake");
+        std::string informationFile = mf->GetModulesFile(fpath);
+        if (informationFile.empty()) {
+          informationFile = mf->GetModulesFile(cmStrCat("Internal/", fpath));
+        }
+        if (informationFile.empty()) {
+          cmSystemTools::Error(
+            cmStrCat("Could not find cmake module file: ", fpath));
+        } else if (!mf->ReadListFile(informationFile)) {
+          cmSystemTools::Error(cmStrCat(
+            "Could not process cmake module file: ", informationFile));
+        }
+      }
+    }
+
     // Store the shared library flags so that we can satisfy CMP0018
     std::string sharedLibFlagsVar =
       cmStrCat("CMAKE_SHARED_LIBRARY_", lang, "_FLAGS");
@@ -1467,12 +1503,14 @@ bool cmGlobalGenerator::CheckALLOW_DUPLICATE_CUSTOM_TARGETS() const
 
   // This generator does not support duplicate custom targets.
   std::ostringstream e;
+  // clang-format off
   e << "This project has enabled the ALLOW_DUPLICATE_CUSTOM_TARGETS "
-    << "global property.  "
-    << "The \"" << this->GetName() << "\" generator does not support "
-    << "duplicate custom targets.  "
-    << "Consider using a Makefiles generator or fix the project to not "
-    << "use duplicate target names.";
+       "global property.  "
+       "The \"" << this->GetName() << "\" generator does not support "
+       "duplicate custom targets.  "
+       "Consider using a Makefiles generator or fix the project to not "
+       "use duplicate target names.";
+  // clang-format on
   cmSystemTools::Error(e.str());
   return false;
 }
@@ -1543,6 +1581,10 @@ bool cmGlobalGenerator::Compute()
   }
   this->FinalizeTargetConfiguration();
 
+  if (!this->AddBuildDatabaseTargets()) {
+    return false;
+  }
+
   this->CreateGenerationObjects();
 
   // at this point this->LocalGenerators has been filled,
@@ -1599,6 +1641,13 @@ bool cmGlobalGenerator::Compute()
   // steps on the created targets.
   if (!this->DiscoverSyntheticTargets()) {
     return false;
+  }
+
+  // Perform after-generator-target generator actions. These involve collecting
+  // information gathered during the construction of generator targets.
+  for (unsigned int i = 0; i < this->Makefiles.size(); ++i) {
+    this->Makefiles[i]->GenerateAfterGeneratorTargets(
+      *this->LocalGenerators[i]);
   }
 
   // Add generator specific helper commands
@@ -1730,11 +1779,12 @@ void cmGlobalGenerator::Generate()
 
   if (!this->CMP0042WarnTargets.empty()) {
     std::ostringstream w;
-    w << cmPolicies::GetPolicyWarning(cmPolicies::CMP0042) << "\n";
-    w << "MACOSX_RPATH is not specified for"
+    w << cmPolicies::GetPolicyWarning(cmPolicies::CMP0042)
+      << "\n"
+         "MACOSX_RPATH is not specified for"
          " the following targets:\n";
     for (std::string const& t : this->CMP0042WarnTargets) {
-      w << " " << t << "\n";
+      w << ' ' << t << '\n';
     }
     this->GetCMakeInstance()->IssueMessage(MessageType::AUTHOR_WARNING,
                                            w.str());
@@ -1751,12 +1801,36 @@ void cmGlobalGenerator::Generate()
       ;
     /* clang-format on */
     for (std::string const& t : this->CMP0068WarnTargets) {
-      w << " " << t << "\n";
+      w << ' ' << t << '\n';
     }
     this->GetCMakeInstance()->IssueMessage(MessageType::AUTHOR_WARNING,
                                            w.str());
   }
 }
+
+#if !defined(CMAKE_BOOTSTRAP)
+void cmGlobalGenerator::WriteJsonContent(const std::string& path,
+                                         const Json::Value& value) const
+{
+  cmsys::ofstream ftmp(path.c_str());
+  this->JsonWriter->write(value, &ftmp);
+  ftmp << '\n';
+  ftmp.close();
+}
+
+void cmGlobalGenerator::WriteInstallJson() const
+{
+  if (this->GetCMakeInstance()->GetState()->GetGlobalPropertyAsBool(
+        "INSTALL_PARALLEL")) {
+    Json::Value index(Json::objectValue);
+    index["InstallScripts"] = Json::arrayValue;
+    for (const auto& file : this->InstallScripts) {
+      index["InstallScripts"].append(file);
+    }
+    this->WriteJsonContent("CMakeFiles/InstallScripts.json", index);
+  }
+}
+#endif
 
 bool cmGlobalGenerator::ComputeTargetDepends()
 {
@@ -2147,9 +2221,9 @@ int cmGlobalGenerator::TryCompile(int jobs, const std::string& srcdir,
   cmBuildOptions defaultBuildOptions(false, fast, PackageResolveMode::Disable);
 
   std::stringstream ostr;
-  auto ret =
-    this->Build(jobs, srcdir, bindir, projectName, newTarget, ostr, "", config,
-                defaultBuildOptions, true, this->TryCompileTimeout);
+  auto ret = this->Build(jobs, srcdir, bindir, projectName, newTarget, ostr,
+                         "", config, defaultBuildOptions, true,
+                         this->TryCompileTimeout, cmSystemTools::OUTPUT_NONE);
   output = ostr.str();
   return ret;
 }
@@ -2178,7 +2252,7 @@ int cmGlobalGenerator::Build(
   const std::string& projectName, const std::vector<std::string>& targets,
   std::ostream& ostr, const std::string& makeCommandCSTR,
   const std::string& config, const cmBuildOptions& buildOptions, bool verbose,
-  cmDuration timeout, cmSystemTools::OutputOption outputflag,
+  cmDuration timeout, cmSystemTools::OutputOption outputMode,
   std::vector<std::string> const& nativeOptions)
 {
   bool hideconsole = cmSystemTools::GetRunCommandHideConsole();
@@ -2190,8 +2264,7 @@ int cmGlobalGenerator::Build(
   ostr << "Change Dir: '" << bindir << '\'' << std::endl;
   if (workdir.Failed()) {
     cmSystemTools::SetRunCommandHideConsole(hideconsole);
-    std::string err = cmStrCat("Failed to change directory: ",
-                               std::strerror(workdir.GetLastResult()));
+    std::string const& err = workdir.GetError();
     cmSystemTools::Error(err);
     ostr << err << std::endl;
     return 1;
@@ -2203,17 +2276,18 @@ int cmGlobalGenerator::Build(
 
   int retVal = 0;
   cmSystemTools::SetRunCommandHideConsole(true);
-  std::string outputBuffer;
-  std::string* outputPtr = &outputBuffer;
+
+  // Capture build command output when outputMode == OUTPUT_NONE.
+  std::string outputBuf;
 
   std::vector<GeneratedMakeCommand> makeCommand = this->GenerateBuildCommand(
     makeCommandCSTR, projectName, bindir, targets, realConfig, jobs, verbose,
     buildOptions, nativeOptions);
 
   // Workaround to convince some commands to produce output.
-  if (outputflag == cmSystemTools::OUTPUT_PASSTHROUGH &&
+  if (outputMode == cmSystemTools::OUTPUT_PASSTHROUGH &&
       makeCommand.back().RequiresOutputForward) {
-    outputflag = cmSystemTools::OUTPUT_FORWARD;
+    outputMode = cmSystemTools::OUTPUT_FORWARD;
   }
 
   // should we do a clean first?
@@ -2232,16 +2306,16 @@ int cmGlobalGenerator::Build(
       return 1;
     }
     if (!cmSystemTools::RunSingleCommand(cleanCommand.front().PrimaryCommand,
-                                         outputPtr, outputPtr, &retVal,
-                                         nullptr, outputflag, timeout)) {
+                                         &outputBuf, &outputBuf, &retVal,
+                                         nullptr, outputMode, timeout)) {
       cmSystemTools::SetRunCommandHideConsole(hideconsole);
       cmSystemTools::Error("Generator: execution of make clean failed.");
-      ostr << *outputPtr << "\nGenerator: execution of make clean failed."
+      ostr << outputBuf << "\nGenerator: execution of make clean failed."
            << std::endl;
 
       return 1;
     }
-    ostr << *outputPtr;
+    ostr << outputBuf;
   }
 
   // now build
@@ -2263,22 +2337,22 @@ int cmGlobalGenerator::Build(
     }
 
     ostr << outputMakeCommandStr << std::endl;
-    if (!cmSystemTools::RunSingleCommand(command->PrimaryCommand, outputPtr,
-                                         outputPtr, &retVal, nullptr,
-                                         outputflag, timeout)) {
+    if (!cmSystemTools::RunSingleCommand(command->PrimaryCommand, &outputBuf,
+                                         &outputBuf, &retVal, nullptr,
+                                         outputMode, timeout)) {
       cmSystemTools::SetRunCommandHideConsole(hideconsole);
       cmSystemTools::Error(
-        cmStrCat("Generator: execution of make failed. Make command was: ",
+        cmStrCat("Generator: build tool execution failed, command was: ",
                  makeCommandStr));
-      ostr << *outputPtr
-           << "\nGenerator: execution of make failed. Make command was: "
+      ostr << outputBuf
+           << "\nGenerator: build tool execution failed, command was: "
            << outputMakeCommandStr << std::endl;
 
       return 1;
     }
-    ostr << *outputPtr << std::flush;
+    ostr << outputBuf << std::flush;
     if (needBuildOutput) {
-      buildOutput += *outputPtr;
+      buildOutput += outputBuf;
     }
   }
   ostr << std::endl;
@@ -2740,7 +2814,7 @@ static bool RaiseCMP0037Message(cmake* cm, cmTarget* tgt,
   bool issueMessage = false;
   switch (tgt->GetPolicyStatusCMP0037()) {
     case cmPolicies::WARN:
-      e << cmPolicies::GetPolicyWarning(cmPolicies::CMP0037) << "\n";
+      e << cmPolicies::GetPolicyWarning(cmPolicies::CMP0037) << '\n';
       issueMessage = true;
       CM_FALLTHROUGH;
     case cmPolicies::OLD:
@@ -2754,7 +2828,7 @@ static bool RaiseCMP0037Message(cmake* cm, cmTarget* tgt,
   }
   if (issueMessage) {
     e << "The target name \"" << targetNameAsWritten << "\" is reserved "
-      << reason << ".";
+      << reason << '.';
     if (messageType == MessageType::AUTHOR_WARNING) {
       e << "  It may result in undefined behavior.";
     }
@@ -2775,6 +2849,20 @@ bool cmGlobalGenerator::CheckCMP0037(std::string const& targetName,
   }
   return RaiseCMP0037Message(this->GetCMakeInstance(), tgt, targetName,
                              reason);
+}
+
+bool cmGlobalGenerator::CheckCMP0037Prefix(std::string const& targetPrefix,
+                                           std::string const& reason) const
+{
+  bool ret = true;
+  for (auto const& tgtPair : this->TargetSearchIndex) {
+    if (cmHasPrefix(tgtPair.first, targetPrefix) &&
+        !RaiseCMP0037Message(this->GetCMakeInstance(), tgtPair.second,
+                             tgtPair.first, reason)) {
+      ret = false;
+    }
+  }
+  return ret;
 }
 
 void cmGlobalGenerator::CreateDefaultGlobalTargets(
@@ -2899,7 +2987,6 @@ void cmGlobalGenerator::AddGlobalTarget_Test(
   }
   cmCustomCommandLine singleLine;
   singleLine.push_back(cmSystemTools::GetCTestCommand());
-  singleLine.push_back("--force-new-ctest-process");
   cmList args(mf->GetDefinition("CMAKE_CTEST_ARGUMENTS"));
   for (auto const& arg : args) {
     singleLine.push_back(arg);
@@ -2935,7 +3022,7 @@ void cmGlobalGenerator::ReserveGlobalTargetCodegen()
   bool issueMessage = false;
   switch (policyStatus) {
     case cmPolicies::WARN:
-      e << cmPolicies::GetPolicyWarning(cmPolicies::CMP0171) << "\n";
+      e << cmPolicies::GetPolicyWarning(cmPolicies::CMP0171) << '\n';
       issueMessage = true;
       CM_FALLTHROUGH;
     case cmPolicies::OLD:
@@ -3042,8 +3129,8 @@ void cmGlobalGenerator::AddGlobalTarget_Install(
       std::set<std::string>* componentsSet = &this->InstallComponents;
       std::ostringstream ostr;
       if (!componentsSet->empty()) {
-        ostr << "Available install components are: ";
-        ostr << cmWrap('"', *componentsSet, '"', " ");
+        ostr << "Available install components are: "
+             << cmWrap('"', *componentsSet, '"', " ");
       } else {
         ostr << "Only default component available";
       }
@@ -3113,7 +3200,7 @@ void cmGlobalGenerator::AddGlobalTarget_Install(
 
     // install_strip
     const char* install_strip = this->GetInstallStripTargetName();
-    if ((install_strip != nullptr) && (mf->IsSet("CMAKE_STRIP"))) {
+    if (install_strip && mf->IsSet("CMAKE_STRIP")) {
       gti.Name = install_strip;
       gti.Message = "Installing the project stripped...";
       gti.UsesTerminal = true;
@@ -3127,6 +3214,205 @@ void cmGlobalGenerator::AddGlobalTarget_Install(
       targets.push_back(gti);
     }
   }
+}
+
+class ModuleCompilationDatabaseCommandAction
+{
+public:
+  ModuleCompilationDatabaseCommandAction(
+    std::string output, std::function<std::vector<std::string>()> inputs)
+    : Output(std::move(output))
+    , Inputs(std::move(inputs))
+  {
+  }
+  void operator()(cmLocalGenerator& lg, const cmListFileBacktrace& lfbt,
+                  std::unique_ptr<cmCustomCommand> cc);
+
+private:
+  std::string const Output;
+  std::function<std::vector<std::string>()> const Inputs;
+};
+
+void ModuleCompilationDatabaseCommandAction::operator()(
+  cmLocalGenerator& lg, const cmListFileBacktrace& lfbt,
+  std::unique_ptr<cmCustomCommand> cc)
+{
+  auto inputs = this->Inputs();
+
+  cmCustomCommandLines command_lines;
+  cmCustomCommandLine command_line;
+  {
+    command_line.emplace_back(cmSystemTools::GetCMakeCommand());
+    command_line.emplace_back("-E");
+    command_line.emplace_back("cmake_module_compile_db");
+    command_line.emplace_back("merge");
+    command_line.emplace_back("-o");
+    command_line.emplace_back(this->Output);
+    for (auto const& input : inputs) {
+      command_line.emplace_back(input);
+    }
+  }
+  command_lines.emplace_back(std::move(command_line));
+
+  cc->SetBacktrace(lfbt);
+  cc->SetCommandLines(command_lines);
+  cc->SetWorkingDirectory(lg.GetBinaryDirectory().c_str());
+  cc->SetDependsExplicitOnly(true);
+  cc->SetOutputs(this->Output);
+  if (!inputs.empty()) {
+    cc->SetMainDependency(inputs[0]);
+  }
+  cc->SetDepends(inputs);
+  detail::AddCustomCommandToOutput(lg, cmCommandOrigin::Generator,
+                                   std::move(cc), false);
+}
+
+class ModuleCompilationDatabaseTargetAction
+{
+public:
+  ModuleCompilationDatabaseTargetAction(std::string output, cmTarget* target)
+    : Output(std::move(output))
+    , Target(target)
+  {
+  }
+  void operator()(cmLocalGenerator& lg, const cmListFileBacktrace& lfbt,
+                  std::unique_ptr<cmCustomCommand> cc);
+
+private:
+  std::string const Output;
+  cmTarget* const Target;
+};
+
+void ModuleCompilationDatabaseTargetAction::operator()(
+  cmLocalGenerator& lg, const cmListFileBacktrace& lfbt,
+  std::unique_ptr<cmCustomCommand> cc)
+{
+  cc->SetBacktrace(lfbt);
+  cc->SetWorkingDirectory(lg.GetBinaryDirectory().c_str());
+  std::vector<std::string> target_inputs;
+  target_inputs.emplace_back(this->Output);
+  cc->SetDepends(target_inputs);
+  detail::AddUtilityCommand(lg, cmCommandOrigin::Generator, this->Target,
+                            std::move(cc));
+}
+
+void cmGlobalGenerator::AddBuildDatabaseFile(std::string const& lang,
+                                             std::string const& config,
+                                             std::string const& path)
+{
+  if (!config.empty()) {
+    this->PerConfigModuleDbs[config][lang].push_back(path);
+  }
+  this->PerLanguageModuleDbs[lang].push_back(path);
+}
+
+bool cmGlobalGenerator::AddBuildDatabaseTargets()
+{
+  auto& mf = this->Makefiles[0];
+  if (!mf->IsOn("CMAKE_EXPORT_BUILD_DATABASE")) {
+    return true;
+  }
+  if (!cmExperimental::HasSupportEnabled(
+        *mf.get(), cmExperimental::Feature::ExportBuildDatabase)) {
+    return {};
+  }
+
+  static const auto reservedTargets = { "cmake_build_database" };
+  for (auto const& target : reservedTargets) {
+    if (!this->CheckCMP0037(target,
+                            "when exporting build databases are enabled")) {
+      return false;
+    }
+  }
+  static const auto reservedPrefixes = { "cmake_build_database-" };
+  for (auto const& prefix : reservedPrefixes) {
+    if (!this->CheckCMP0037Prefix(
+          prefix, "when exporting build databases are enabled")) {
+      return false;
+    }
+  }
+
+  if (!this->SupportsBuildDatabase()) {
+    return true;
+  }
+
+  auto configs = mf->GetGeneratorConfigs(cmMakefile::ExcludeEmptyConfig);
+
+  static cm::static_string_view TargetPrefix = "cmake_build_database"_s;
+  auto AddMergeTarget =
+    [&mf](std::string const& name, const char* comment,
+          std::string const& output,
+          std::function<std::vector<std::string>()> inputs) {
+      // Add the custom command.
+      {
+        ModuleCompilationDatabaseCommandAction action{ output,
+                                                       std::move(inputs) };
+        auto cc = cm::make_unique<cmCustomCommand>();
+        cc->SetComment(comment);
+        mf->AddGeneratorAction(
+          std::move(cc), action,
+          cmMakefile::GeneratorActionWhen::AfterGeneratorTargets);
+      }
+
+      // Add a custom target with the given name.
+      {
+        cmTarget* target = mf->AddNewUtilityTarget(name, true);
+        ModuleCompilationDatabaseTargetAction action{ output, target };
+        auto cc = cm::make_unique<cmCustomCommand>();
+        mf->AddGeneratorAction(std::move(cc), action);
+      }
+    };
+
+  std::string module_languages[] = { "CXX" };
+
+  // Add per-configuration targets.
+  for (auto const& config : configs) {
+    // Add per-language targets.
+    std::vector<std::string> all_config_paths;
+    for (auto const& lang : module_languages) {
+      auto comment = cmStrCat("Combining module command databases for ", lang,
+                              " and ", config);
+      auto output = cmStrCat(mf->GetHomeOutputDirectory(), "/build_database_",
+                             lang, '_', config, ".json");
+      mf->GetOrCreateGeneratedSource(output);
+      AddMergeTarget(cmStrCat(TargetPrefix, '-', lang, '-', config),
+                     comment.c_str(), output, [this, config, lang]() {
+                       return this->PerConfigModuleDbs[config][lang];
+                     });
+      all_config_paths.emplace_back(std::move(output));
+    }
+
+    // Add the overall target.
+    auto comment = cmStrCat("Combining module command databases for ", config);
+    auto output = cmStrCat(mf->GetHomeOutputDirectory(), "/build_database_",
+                           config, ".json");
+    mf->GetOrCreateGeneratedSource(output);
+    AddMergeTarget(cmStrCat(TargetPrefix, '-', config), comment.c_str(),
+                   output, [all_config_paths]() { return all_config_paths; });
+  }
+
+  // NMC considerations
+  // Add per-language targets.
+  std::vector<std::string> all_config_paths;
+  for (auto const& lang : module_languages) {
+    auto comment = cmStrCat("Combining module command databases for ", lang);
+    auto output = cmStrCat(mf->GetHomeOutputDirectory(), "/build_database_",
+                           lang, ".json");
+    mf->GetOrCreateGeneratedSource(output);
+    AddMergeTarget(
+      cmStrCat(TargetPrefix, '-', lang), comment.c_str(), output,
+      [this, lang]() { return this->PerLanguageModuleDbs[lang]; });
+    all_config_paths.emplace_back(std::move(output));
+  }
+
+  // Add the overall target.
+  auto const* comment = "Combining all module command databases";
+  auto output = cmStrCat(mf->GetHomeOutputDirectory(), "/build_database.json");
+  mf->GetOrCreateGeneratedSource(output);
+  AddMergeTarget(std::string(TargetPrefix), comment, output,
+                 [all_config_paths]() { return all_config_paths; });
+
+  return true;
 }
 
 std::string cmGlobalGenerator::GetPredefinedTargetsFolder() const
@@ -3459,7 +3745,7 @@ void cmGlobalGenerator::WriteRuleHashes(std::string const& pfile)
     fout << "# Hashes of file build rules.\n";
     for (auto const& rh : this->RuleHashes) {
       fout.write(rh.second.Data, 32);
-      fout << " " << rh.first << "\n";
+      fout << ' ' << rh.first << '\n';
     }
   }
 }
@@ -3477,7 +3763,7 @@ void cmGlobalGenerator::WriteSummary()
         continue;
       }
       this->WriteSummary(tgt.get());
-      fout << tgt->GetSupportDirectory() << "\n";
+      fout << tgt->GetSupportDirectory() << '\n';
     }
   }
 }
@@ -3515,7 +3801,7 @@ void cmGlobalGenerator::WriteSummary(cmGeneratorTarget* target)
       if (!labels.empty()) {
         fout << "# Target labels\n";
         for (std::string const& l : labels) {
-          fout << " " << l << "\n";
+          fout << ' ' << l << '\n';
           lj_target_labels.append(l);
         }
       }
@@ -3538,12 +3824,12 @@ void cmGlobalGenerator::WriteSummary(cmGeneratorTarget* target)
     }
 
     for (auto const& li : directoryLabelsList) {
-      fout << " " << li << "\n";
+      fout << ' ' << li << '\n';
       lj_target_labels.append(li);
     }
 
     for (auto const& li : cmakeDirectoryLabelsList) {
-      fout << " " << li << "\n";
+      fout << ' ' << li << '\n';
       lj_target_labels.append(li);
     }
 
@@ -3560,13 +3846,13 @@ void cmGlobalGenerator::WriteSummary(cmGeneratorTarget* target)
     for (cmSourceFile* sf : cmMakeRange(sources.cbegin(), sourcesEnd)) {
       Json::Value& lj_source = lj_sources.append(Json::objectValue);
       std::string const& sfp = sf->ResolveFullPath();
-      fout << sfp << "\n";
+      fout << sfp << '\n';
       lj_source["file"] = sfp;
       if (cmValue svalue = sf->GetProperty("LABELS")) {
         Json::Value& lj_source_labels = lj_source["labels"] = Json::arrayValue;
         labels.assign(*svalue);
         for (auto const& label : labels) {
-          fout << " " << label << "\n";
+          fout << ' ' << label << '\n';
           lj_source_labels.append(label);
         }
       }
@@ -3731,4 +4017,9 @@ cmGlobalGenerator::StripCommandStyle cmGlobalGenerator::GetStripCommandStyle(
   static_cast<void>(strip);
   return StripCommandStyle::Default;
 #endif
+}
+
+void cmGlobalGenerator::AddInstallScript(std::string const& file)
+{
+  this->InstallScripts.push_back(file);
 }

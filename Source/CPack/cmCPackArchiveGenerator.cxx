@@ -2,7 +2,6 @@
    file Copyright.txt or https://cmake.org/licensing for details.  */
 #include "cmCPackArchiveGenerator.h"
 
-#include <cstring>
 #include <map>
 #include <ostream>
 #include <unordered_map>
@@ -238,10 +237,7 @@ int cmCPackArchiveGenerator::addOneComponentToArchive(
   // Change to local toplevel
   cmWorkingDirectory workdir(localToplevel);
   if (workdir.Failed()) {
-    cmCPackLogger(cmCPackLog::LOG_ERROR,
-                  "Failed to change working directory to "
-                    << localToplevel << " : "
-                    << std::strerror(workdir.GetLastResult()) << std::endl);
+    cmCPackLogger(cmCPackLog::LOG_ERROR, workdir.GetError() << std::endl);
     return 0;
   }
   std::string filePrefix;
@@ -259,11 +255,11 @@ int cmCPackArchiveGenerator::addOneComponentToArchive(
     std::string rp = filePrefix + file;
 
     DeduplicateStatus status = DeduplicateStatus::Add;
-    if (deduplicator != nullptr) {
+    if (deduplicator) {
       status = deduplicator->IsDeduplicate(rp, localToplevel);
     }
 
-    if (deduplicator == nullptr || status == DeduplicateStatus::Add) {
+    if (!deduplicator || status == DeduplicateStatus::Add) {
       cmCPackLogger(cmCPackLog::LOG_DEBUG, "Adding file: " << rp << std::endl);
       archive.Add(rp, 0, nullptr, false);
     } else if (status == DeduplicateStatus::Error) {
@@ -350,7 +346,7 @@ int cmCPackArchiveGenerator::PackageComponents(bool ignoreGroup)
     // Handle Orphan components (components not belonging to any groups)
     for (auto& comp : this->Components) {
       // Does the component belong to a group?
-      if (comp.second.Group == nullptr) {
+      if (!comp.second.Group) {
         cmCPackLogger(
           cmCPackLog::LOG_VERBOSE,
           "Component <"
@@ -448,10 +444,7 @@ int cmCPackArchiveGenerator::PackageFiles()
   DECLARE_AND_OPEN_ARCHIVE(packageFileNames[0], archive);
   cmWorkingDirectory workdir(this->toplevel);
   if (workdir.Failed()) {
-    cmCPackLogger(cmCPackLog::LOG_ERROR,
-                  "Failed to change working directory to "
-                    << this->toplevel << " : "
-                    << std::strerror(workdir.GetLastResult()) << std::endl);
+    cmCPackLogger(cmCPackLog::LOG_ERROR, workdir.GetError() << std::endl);
     return 0;
   }
   for (std::string const& file : this->files) {

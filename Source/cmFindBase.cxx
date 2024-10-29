@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <deque>
-#include <functional>
 #include <iterator>
 #include <map>
 #include <utility>
@@ -57,7 +56,9 @@ bool cmFindBase::ParseArguments(std::vector<std::string> const& argsIn)
       } else if (argsIn[j] == "ENV") {
         if (j + 1 < size) {
           j++;
-          cmSystemTools::GetPath(args, argsIn[j].c_str());
+          std::vector<std::string> p =
+            cmSystemTools::GetEnvPathNormalized(argsIn[j]);
+          std::move(p.begin(), p.end(), std::back_inserter(args));
         }
       } else {
         args.push_back(argsIn[j]);
@@ -149,7 +150,7 @@ bool cmFindBase::ParseArguments(std::vector<std::string> const& argsIn)
         return false;
       }
       auto command = this->Makefile->GetState()->GetCommand(args[j]);
-      if (command == nullptr) {
+      if (!command) {
         this->SetError(cmStrCat(
           "command specified for \"VALIDATOR\" is undefined: ", args[j], '.'));
         return false;
@@ -339,7 +340,6 @@ namespace {
 struct entry_to_remove
 {
   entry_to_remove(std::string const& name, cmMakefile* makefile)
-    : value()
   {
     if (cmValue to_skip = makefile->GetDefinition(
           cmStrCat("_CMAKE_SYSTEM_PREFIX_PATH_", name, "_PREFIX_COUNT"))) {
@@ -405,9 +405,11 @@ void cmFindBase::FillCMakeSystemVariablePath()
     cmList expanded{ *prefix_paths };
     install_entry.remove_self(expanded);
     staging_entry.remove_self(expanded);
-
-    paths.AddPrefixPaths(expanded,
-                         this->Makefile->GetCurrentSourceDirectory().c_str());
+    for (std::string& p : expanded) {
+      p = cmSystemTools::CollapseFullPath(
+        p, this->Makefile->GetCurrentSourceDirectory());
+    }
+    paths.AddPrefixPaths(expanded);
   } else if (add_install_prefix && !install_prefix_in_list) {
     paths.AddCMakePrefixPath("CMAKE_INSTALL_PREFIX");
     paths.AddCMakePrefixPath("CMAKE_STAGING_PREFIX");
@@ -495,7 +497,6 @@ void cmFindBase::NormalizeFindResult()
             this->Makefile->GetCMakeInstance()->GetCMakeWorkingDirectory()))
           .Normal()
           .GenericString();
-      // value = cmSystemTools::CollapseFullPath(*existingValue);
       if (!cmSystemTools::FileExists(value, false)) {
         value = *existingValue;
       }

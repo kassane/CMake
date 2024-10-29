@@ -59,9 +59,6 @@
 
 #include <cctype>
 #include <cerrno>
-#ifdef __QNX__
-#  include <malloc.h> /* for malloc/free on QNX */
-#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -268,7 +265,7 @@ static inline char* realpath(const char* path, char* resolved_path)
   snprintf(resolved_path, maxlen, "%s", path);
   BPath normalized(resolved_path, nullptr, true);
   const char* resolved = normalized.Path();
-  if (resolved != nullptr) // nullptr == No such file.
+  if (resolved) // nullptr == No such file.
   {
     if (snprintf(resolved_path, maxlen, "%s", resolved) < maxlen) {
       return resolved_path;
@@ -338,10 +335,9 @@ inline void Realpath(const std::string& path, std::string& resolved_path,
                      std::string* errorMessage = nullptr)
 {
   std::wstring tmp = KWSYS_NAMESPACE::Encoding::ToWide(path);
-  wchar_t* ptemp;
   wchar_t fullpath[MAX_PATH];
   DWORD bufferLen = GetFullPathNameW(
-    tmp.c_str(), sizeof(fullpath) / sizeof(fullpath[0]), fullpath, &ptemp);
+    tmp.c_str(), sizeof(fullpath) / sizeof(fullpath[0]), fullpath, nullptr);
   if (bufferLen < sizeof(fullpath) / sizeof(fullpath[0])) {
     resolved_path = KWSYS_NAMESPACE::Encoding::ToNarrow(fullpath);
     KWSYS_NAMESPACE::SystemTools::ConvertToUnixSlashes(resolved_path);
@@ -798,7 +794,7 @@ bool SystemTools::HasEnv(const char* key)
 #else
   const char* v = getenv(key);
 #endif
-  return v != nullptr;
+  return v;
 }
 
 bool SystemTools::HasEnv(const std::string& key)
@@ -824,24 +820,13 @@ static int kwsysUnPutEnv(const std::string& env)
 #elif defined(__CYGWIN__) || defined(__GLIBC__)
 /* putenv("A") removes A from the environment.  It must not put the
    memory in the environment because it does not have any "=" syntax.  */
+
 static int kwsysUnPutEnv(const std::string& env)
 {
   int err = 0;
-  size_t pos = env.find('=');
-  size_t const len = pos == std::string::npos ? env.size() : pos;
-  size_t const sz = len + 1;
-  char local_buf[256];
-  char* buf = sz > sizeof(local_buf) ? (char*)malloc(sz) : local_buf;
-  if (!buf) {
-    return -1;
-  }
-  strncpy(buf, env.c_str(), len);
-  buf[len] = 0;
-  if (putenv(buf) < 0 && errno != EINVAL) {
+  std::string buf = env.substr(0, env.find('='));
+  if (putenv(&buf[0]) < 0 && errno != EINVAL) {
     err = errno;
-  }
-  if (buf != local_buf) {
-    free(buf);
   }
   if (err) {
     errno = err;
@@ -1167,7 +1152,7 @@ static DWORD SystemToolsMakeRegistryMode(DWORD mode,
   // only add the modes when on a system that supports Wow64.
   static FARPROC wow64p =
     GetProcAddress(GetModuleHandleW(L"kernel32"), "IsWow64Process");
-  if (wow64p == nullptr) {
+  if (!wow64p) {
     return mode;
   }
 
@@ -2597,8 +2582,12 @@ SystemTools::CopyStatus SystemTools::CloneFileContent(
 
   // NOTE: we cannot use `clonefile` as the {a,c,m}time for the file needs to
   // be updated by `copy_file_if_different` and `copy_file`.
+  // These flags are meant to be COPYFILE_METADATA | COPYFILE_CLONE, but CLONE
+  // forces COPYFILE_NOFOLLOW_SRC and that violates the invariant that this
+  // should result in a file.
   if (copyfile(source.c_str(), destination.c_str(), nullptr,
-               COPYFILE_METADATA | COPYFILE_CLONE) < 0) {
+               COPYFILE_METADATA | COPYFILE_EXCL | COPYFILE_STAT |
+                 COPYFILE_XATTR | COPYFILE_DATA) < 0) {
     return CopyStatus{ Status::POSIX_errno(), CopyStatus::NoPath };
   }
 #  if KWSYS_CXX_HAS_UTIMENSAT
@@ -3394,7 +3383,7 @@ Status SystemTools::ReadSymlink(std::string const& newName,
     // terminated by an empty string (0-0).  We need the third string.
     size_t destLen;
     substituteNameData = GetAppExecLink(data, destLen);
-    if (substituteNameData == nullptr || destLen == 0) {
+    if (!substituteNameData || destLen == 0) {
       return Status::Windows(ERROR_SYMLINK_NOT_SUPPORTED);
     }
     substituteNameLength = static_cast<USHORT>(destLen);
@@ -3643,7 +3632,6 @@ std::string CollapseFullPathImpl(std::string const& in_path,
   SystemTools::CheckTranslationPath(newPath);
 #endif
 #ifdef _WIN32
-  newPath = SystemToolsStatics->GetActualCaseForPathCached(newPath);
   SystemTools::ConvertToUnixSlashes(newPath);
 #endif
   // Return the reconstructed path.
@@ -3753,6 +3741,15 @@ std::string SystemTools::GetActualCaseForPath(const std::string& p)
 {
 #ifdef _WIN32
   return SystemToolsStatic::GetCasePathName(p, false);
+#else
+  return p;
+#endif
+}
+
+std::string SystemTools::GetActualCaseForPathCached(const std::string& p)
+{
+#ifdef _WIN32
+  return SystemToolsStatic::GetActualCaseForPathCached(p);
 #else
   return p;
 #endif

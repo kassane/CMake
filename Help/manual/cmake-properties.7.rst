@@ -109,6 +109,7 @@ Properties on Targets
 
    /prop_tgt/ADDITIONAL_CLEAN_FILES
    /prop_tgt/AIX_EXPORT_ALL_SYMBOLS
+   /prop_tgt/AIX_SHARED_LIBRARY_ARCHIVE
    /prop_tgt/ALIAS_GLOBAL
    /prop_tgt/ALIASED_TARGET
    /prop_tgt/ANDROID_ANT_ADDITIONAL_OPTIONS
@@ -216,6 +217,7 @@ Properties on Targets
    /prop_tgt/EXCLUDE_FROM_ALL
    /prop_tgt/EXCLUDE_FROM_DEFAULT_BUILD
    /prop_tgt/EXCLUDE_FROM_DEFAULT_BUILD_CONFIG
+   /prop_tgt/EXPORT_BUILD_DATABASE
    /prop_tgt/EXPORT_COMPILE_COMMANDS
    /prop_tgt/EXPORT_FIND_PACKAGE_NAME
    /prop_tgt/EXPORT_NAME
@@ -334,6 +336,7 @@ Properties on Targets
    /prop_tgt/LINK_INTERFACE_MULTIPLICITY_CONFIG
    /prop_tgt/LINK_LIBRARIES
    /prop_tgt/LINK_LIBRARIES_ONLY_TARGETS
+   /prop_tgt/LINK_LIBRARIES_STRATEGY
    /prop_tgt/LINK_LIBRARY_OVERRIDE
    /prop_tgt/LINK_LIBRARY_OVERRIDE_LIBRARY
    /prop_tgt/LINK_OPTIONS
@@ -412,6 +415,7 @@ Properties on Targets
    /prop_tgt/UNITY_BUILD_CODE_AFTER_INCLUDE
    /prop_tgt/UNITY_BUILD_CODE_BEFORE_INCLUDE
    /prop_tgt/UNITY_BUILD_MODE
+   /prop_tgt/UNITY_BUILD_RELOCATABLE
    /prop_tgt/UNITY_BUILD_UNIQUE_ID
    /prop_tgt/VERIFY_INTERFACE_HEADER_SETS
    /prop_tgt/VERSION

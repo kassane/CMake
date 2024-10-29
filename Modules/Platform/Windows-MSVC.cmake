@@ -353,20 +353,12 @@ else()
 endif()
 unset(__WINDOWS_MSVC_CMP0141)
 
-# Features for LINK_LIBRARY generator expression
-if(MSVC_VERSION GREATER "1900")
-  ## WHOLE_ARCHIVE: Force loading all members of an archive
-  set(CMAKE_LINK_LIBRARY_USING_WHOLE_ARCHIVE "/WHOLEARCHIVE:<LIBRARY>")
-  set(CMAKE_LINK_LIBRARY_USING_WHOLE_ARCHIVE_SUPPORTED TRUE)
-  set(CMAKE_LINK_LIBRARY_WHOLE_ARCHIVE_ATTRIBUTES LIBRARY_TYPE=STATIC DEDUPLICATION=YES OVERRIDE=DEFAULT)
-endif()
-
 
 macro(__windows_compiler_msvc lang)
   if(NOT MSVC_VERSION LESS 1400)
     # for 2005 make sure the manifest is put in the dll with mt
-    set(_CMAKE_VS_LINK_DLL "<CMAKE_COMMAND> -E vs_link_dll --intdir=<OBJECT_DIR> --rc=<CMAKE_RC_COMPILER> --mt=<CMAKE_MT> --manifests <MANIFESTS> -- ")
-    set(_CMAKE_VS_LINK_EXE "<CMAKE_COMMAND> -E vs_link_exe --intdir=<OBJECT_DIR> --rc=<CMAKE_RC_COMPILER> --mt=<CMAKE_MT> --manifests <MANIFESTS> -- ")
+    set(_CMAKE_VS_LINK_DLL "<CMAKE_COMMAND> -E vs_link_dll --msvc-ver=${MSVC_VERSION} --intdir=<OBJECT_DIR> --rc=<CMAKE_RC_COMPILER> --mt=<CMAKE_MT> --manifests <MANIFESTS> -- ")
+    set(_CMAKE_VS_LINK_EXE "<CMAKE_COMMAND> -E vs_link_exe --msvc-ver=${MSVC_VERSION} --intdir=<OBJECT_DIR> --rc=<CMAKE_RC_COMPILER> --mt=<CMAKE_MT> --manifests <MANIFESTS> -- ")
   endif()
   if(CMAKE_SYSTEM_NAME STREQUAL "WindowsKernelModeDriver")
     set(_DLL_DRIVER "-driver")
@@ -513,8 +505,6 @@ macro(__windows_compiler_msvc lang)
     set(CMAKE_DEPFILE_FLAGS_${lang} "/showIncludes")
     set(CMAKE_${lang}_DEPFILE_FORMAT msvc)
   endif()
-
-  set(CMAKE_${lang}_LINK_LIBRARIES_PROCESSING ORDER=FORWARD DEDUPLICATION=ALL)
 
   # linker selection
   set(CMAKE_${lang}_USING_LINKER_SYSTEM "${CMAKE_LINKER_LINK}")

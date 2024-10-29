@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 2.6)
+cmake_minimum_required(VERSION 3.10)
 project(FindPackageTest)
 
 # Protect tests from running inside the default install prefix.
@@ -204,7 +204,7 @@ if(UNIX
   # The result must preserve the /symlink/ path.
   set(SetFoundResolved_EXPECTED "${CMAKE_CURRENT_SOURCE_DIR}/symlink/cmake")
   if(NOT "${SetFoundResolved_DIR}" STREQUAL "${SetFoundResolved_EXPECTED}")
-    message(SEND_ERROR "SetFoundResolved_DIR set by find_package() is set to \"${SetFoundResolved_DIR}\" (expected \"${SetFoundResolved_EXPECTED}\")")
+    message(SEND_ERROR "SetFoundResolved_DIR set by find_package() is set to\n  \"${SetFoundResolved_DIR}\"\nnot the expected\n  \"${SetFoundResolved_EXPECTED}\"")
   endif()
 
   # This part of the test only works if there are no symlinks in our path.
@@ -217,7 +217,7 @@ if(UNIX
     # ./symlink points back here so it should be gone when resolved.
     set(SetFoundResolved_EXPECTED "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     if(NOT "${SetFoundResolved_DIR}" STREQUAL "${SetFoundResolved_EXPECTED}")
-      message(SEND_ERROR "SetFoundResolved_DIR set by find_package() is set to \"${SetFoundResolved_DIR}\" (expected \"${SetFoundResolved_EXPECTED}\")")
+      message(SEND_ERROR "SetFoundResolved_DIR set by find_package() is set to\n  \"${SetFoundResolved_DIR}\"\nnot the expected\n  \"${SetFoundResolved_EXPECTED}\"")
     endif()
   endif()
 
@@ -492,15 +492,15 @@ set(Relocatable_FIND_REQUIRED_BComp 1)
 include("${CMAKE_CURRENT_BINARY_DIR}/RelocatableConfig.cmake")
 
 if(NOT "${RELOC_INCLUDE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}/include")
-  message(SEND_ERROR "RELOC_INCLUDE_DIR set by configure_package_config_file() is set to \"${RELOC_INCLUDE_DIR}\" (expected \"${CMAKE_CURRENT_BINARY_DIR}/include\")")
+  message(SEND_ERROR "RELOC_INCLUDE_DIR set by configure_package_config_file() is set to\n  \"${RELOC_INCLUDE_DIR}\"\nnot the expected\n  \"${CMAKE_CURRENT_BINARY_DIR}/include\"")
 endif()
 
 if(NOT "${RELOC_SHARE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}/share/")
-  message(SEND_ERROR "RELOC_SHARE_DIR set by configure_package_config_file() is set to \"${RELOC_SHARE_DIR}\" (expected \"${CMAKE_CURRENT_BINARY_DIR}/share/\")")
+  message(SEND_ERROR "RELOC_SHARE_DIR set by configure_package_config_file() is set to\n  \"${RELOC_SHARE_DIR}\"\nnot the expected\n  \"${CMAKE_CURRENT_BINARY_DIR}/share/\"")
 endif()
 
 if(NOT "${RELOC_BUILD_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
-  message(SEND_ERROR "RELOC_BUILD_DIR set by configure_package_config_file() is set to \"${RELOC_BUILD_DIR}\" (expected \"${CMAKE_CURRENT_BINARY_DIR}\")")
+  message(SEND_ERROR "RELOC_BUILD_DIR set by configure_package_config_file() is set to\n  \"${RELOC_BUILD_DIR}\"\nnot the expected\n  \"${CMAKE_CURRENT_BINARY_DIR}\"")
 endif()
 
 if(NOT DEFINED Relocatable_FOUND)
@@ -527,15 +527,15 @@ set(Relocatable_FIND_REQUIRED_BComp 1)
 include("${CMAKE_CURRENT_BINARY_DIR}/RelocatableConfig.cmake")
 
 if(NOT "${RELOC_INCLUDE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}/include")
-  message(SEND_ERROR "RELOC_INCLUDE_DIR set by configure_package_config_file() is set to \"${RELOC_INCLUDE_DIR}\" (expected \"${CMAKE_CURRENT_BINARY_DIR}/include\")")
+  message(SEND_ERROR "RELOC_INCLUDE_DIR set by configure_package_config_file() is set to\n  \"${RELOC_INCLUDE_DIR}\"\nnot the expected\n  \"${CMAKE_CURRENT_BINARY_DIR}/include\"")
 endif()
 
 if(NOT "${RELOC_SHARE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}/share/")
-  message(SEND_ERROR "RELOC_SHARE_DIR set by configure_package_config_file() is set to \"${RELOC_SHARE_DIR}\" (expected \"${CMAKE_CURRENT_BINARY_DIR}/share/\")")
+  message(SEND_ERROR "RELOC_SHARE_DIR set by configure_package_config_file() is set to\n  \"${RELOC_SHARE_DIR}\"\nnot the expected\n  \"${CMAKE_CURRENT_BINARY_DIR}/share/\"")
 endif()
 
 if(NOT "${RELOC_BUILD_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
-  message(SEND_ERROR "RELOC_BUILD_DIR set by configure_package_config_file() is set to \"${RELOC_BUILD_DIR}\" (expected \"${CMAKE_CURRENT_BINARY_DIR}\")")
+  message(SEND_ERROR "RELOC_BUILD_DIR set by configure_package_config_file() is set to\n  \"${RELOC_BUILD_DIR}\"\nnot the expected\n  \"${CMAKE_CURRENT_BINARY_DIR}\"")
 endif()
 
 if(NOT DEFINED Relocatable_FOUND)
@@ -550,10 +550,10 @@ endif()
 ############################################################################
 ##Test FIND_PACKAGE using sorting
 set(CMAKE_PREFIX_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-SET(CMAKE_FIND_PACKAGE_SORT_ORDER NAME)
-SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION ASC)
 
 set(SortLib_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
+SET(CMAKE_FIND_PACKAGE_SORT_ORDER NAME)
+SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION ASC)
 FIND_PACKAGE(SortLib CONFIG)
 IF (NOT "${SortLib_VERSION}" STREQUAL "3.1.1")
   message(SEND_ERROR "FIND_PACKAGE_SORT_ORDER Name Asc! ${SortLib_VERSION}")
@@ -570,6 +570,36 @@ IF (NOT "${SortLib_VERSION}" STREQUAL "3.10.1")
 endif()
 set(SortLib_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
 unset(SortLib_VERSION)
+
+
+set(SortLib_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
+FIND_PACKAGE(SortLib 4.0 CONFIG)
+IF (NOT "${SortLib_VERSION}" STREQUAL "4.0.0")
+  message(SEND_ERROR "FIND_PACKAGE_SORT_ORDER gave up too soon! ${SortLib_VERSION}")
+endif()
+unset(SortLib_VERSION)
+
+
+set(SortFramework_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
+SET(CMAKE_FIND_PACKAGE_SORT_ORDER NAME)
+SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION ASC)
+FIND_PACKAGE(SortFramework CONFIG)
+IF (NOT "${SortFramework_VERSION}" STREQUAL "3.1.1")
+  message(SEND_ERROR "FIND_PACKAGE_SORT_ORDER Framework Name Asc! ${SortFramework_VERSION}")
+endif()
+set(SortLib_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
+unset(SortFramework_VERSION)
+
+
+set(SortFramework_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
+SET(CMAKE_FIND_PACKAGE_SORT_ORDER NATURAL)
+SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
+FIND_PACKAGE(SortFramework CONFIG)
+IF (NOT "${SortFramework_VERSION}" STREQUAL "3.10.1")
+  message(SEND_ERROR "FIND_PACKAGE_SORT_ORDER Framework Natural! Dec ${SortFramework_VERSION}")
+endif()
+set(SortLib_DIR "" CACHE FILEPATH "Wipe out find results for testing." FORCE)
+unset(SortFramework_VERSION)
 
 unset(CMAKE_FIND_PACKAGE_SORT_ORDER)
 unset(CMAKE_FIND_PACKAGE_SORT_DIRECTION)

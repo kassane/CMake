@@ -8,6 +8,7 @@
 #include <set>
 #include <utility>
 
+#include <cm/string_view>
 #include <cmext/algorithm>
 
 #include <cm3p/uv.h>
@@ -188,9 +189,9 @@ cmCTestBuildHandler::cmCTestBuildHandler()
   this->UseCTestLaunch = false;
 }
 
-void cmCTestBuildHandler::Initialize()
+void cmCTestBuildHandler::Initialize(cmCTest* ctest)
 {
-  this->Superclass::Initialize();
+  this->Superclass::Initialize(ctest);
   this->StartBuild.clear();
   this->EndBuild.clear();
   this->CustomErrorMatches.clear();
@@ -579,9 +580,6 @@ void cmCTestBuildHandler::GenerateXMLLogScraped(cmXMLWriter& xml)
   int numErrorsAllowed = this->MaxErrors;
   int numWarningsAllowed = this->MaxWarnings;
   std::string srcdir = this->CTest->GetCTestConfiguration("SourceDirectory");
-  // make sure the source dir is in the correct case on windows
-  // via a call to collapse full path.
-  srcdir = cmStrCat(cmSystemTools::CollapseFullPath(srcdir), '/');
   for (it = ew.begin();
        it != ew.end() && (numErrorsAllowed || numWarningsAllowed); it++) {
     cmCTestBuildErrorWarning* cm = &(*it);
@@ -612,8 +610,9 @@ void cmCTestBuildHandler::GenerateXMLLogScraped(cmXMLWriter& xml)
             }
           } else {
             // make sure it is a full path with the correct case
-            cm->SourceFile = cmSystemTools::CollapseFullPath(cm->SourceFile);
-            cmSystemTools::ReplaceString(cm->SourceFile, srcdir.c_str(), "");
+            cm->SourceFile =
+              cmSystemTools::ToNormalizedPathOnDisk(cm->SourceFile);
+            cmSystemTools::ReplaceString(cm->SourceFile, srcdir, "");
           }
           cm->LineNumber = atoi(re->match(rit.LineIndex).c_str());
           break;
@@ -1121,10 +1120,10 @@ void cmCTestBuildHandler::ProcessBuffer(const char* data, size_t length,
 
   // And if this is verbose output, display the content of the chunk
   cmCTestLog(this->CTest, HANDLER_VERBOSE_OUTPUT,
-             cmCTestLogWrite(data, length));
+             cm::string_view(data, length));
 
   // Always store the chunk to the file
-  ofs << cmCTestLogWrite(data, length);
+  ofs << cm::string_view(data, length);
 }
 
 int cmCTestBuildHandler::ProcessSingleLine(const char* data)

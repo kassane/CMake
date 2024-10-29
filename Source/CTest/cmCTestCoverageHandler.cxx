@@ -6,7 +6,6 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <iomanip>
 #include <iterator>
 #include <memory>
@@ -43,9 +42,9 @@ class cmMakefile;
 
 cmCTestCoverageHandler::cmCTestCoverageHandler() = default;
 
-void cmCTestCoverageHandler::Initialize()
+void cmCTestCoverageHandler::Initialize(cmCTest* ctest)
 {
-  this->Superclass::Initialize();
+  this->Superclass::Initialize(ctest);
   this->CustomCoverageExclude.clear();
   this->SourceLabels.clear();
   this->TargetDirs.clear();
@@ -1325,10 +1324,7 @@ int cmCTestCoverageHandler::HandleLCovCoverage(
     std::string fileDir = cmSystemTools::GetFilenamePath(f);
     cmWorkingDirectory workdir(fileDir);
     if (workdir.Failed()) {
-      cmCTestLog(this->CTest, ERROR_MESSAGE,
-                 "Unable to change working directory to "
-                   << fileDir << " : "
-                   << std::strerror(workdir.GetLastResult()) << std::endl);
+      cmCTestLog(this->CTest, ERROR_MESSAGE, workdir.GetError() << std::endl);
       cont->Error++;
       continue;
     }
@@ -1550,9 +1546,7 @@ bool cmCTestCoverageHandler::FindLCovFiles(std::vector<std::string>& files)
   std::string buildDir = this->CTest->GetCTestConfiguration("BuildDirectory");
   cmWorkingDirectory workdir(buildDir);
   if (workdir.Failed()) {
-    cmCTestLog(this->CTest, ERROR_MESSAGE,
-               "Unable to change working directory to " << buildDir
-                                                        << std::endl);
+    cmCTestLog(this->CTest, ERROR_MESSAGE, workdir.GetError() << std::endl);
     return false;
   }
 
@@ -1819,7 +1813,7 @@ int cmCTestCoverageHandler::RunBullseyeCoverageBranch(
         covLogXML.StartElement("Report");
         // write the bullseye header
         line = 0;
-        for (int k = 0; bullseyeHelp[k] != nullptr; ++k) {
+        for (int k = 0; bullseyeHelp[k]; ++k) {
           covLogXML.StartElement("Line");
           covLogXML.Attribute("Number", line);
           covLogXML.Attribute("Count", -1);

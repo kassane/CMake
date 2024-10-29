@@ -20,6 +20,8 @@
 
 #include "cmSystemTools.h"
 
+#include <iterator>
+
 #include <cm/optional>
 #include <cmext/algorithm>
 #include <cmext/string_view>
@@ -36,6 +38,7 @@
 #include "cmUVProcessChain.h"
 #include "cmUVStream.h"
 #include "cmValue.h"
+#include "cmWorkingDirectory.h"
 
 #if !defined(CMAKE_BOOTSTRAP)
 #  include <cm3p/archive.h>
@@ -132,7 +135,7 @@ cmSystemTools::OutputCallback s_StdoutCallback;
 #  if defined(_WIN32)
 extern __declspec(dllimport) char** environ;
 #  else
-extern char** environ;
+extern char** environ; // NOLINT(readability-redundant-declaration)
 #  endif
 #endif
 
@@ -970,6 +973,17 @@ cmSystemTools::WindowsVersion cmSystemTools::GetWindowsVersion()
   result.dwBuildNumber = osviex.dwBuildNumber;
   return result;
 }
+
+std::string cmSystemTools::GetComspec()
+{
+  std::string comspec;
+  if (!cmSystemTools::GetEnv("COMSPEC", comspec) ||
+      !cmSystemTools::FileIsFullPath(comspec)) {
+    comspec = "cmd.exe";
+  }
+  return comspec;
+}
+
 #endif
 
 std::string cmSystemTools::GetRealPathResolvingWindowsSubst(
@@ -1319,16 +1333,18 @@ cmSystemTools::RenameResult cmSystemTools::RenameFile(
 #endif
 }
 
-void cmSystemTools::MoveFileIfDifferent(const std::string& source,
-                                        const std::string& destination)
+cmsys::Status cmSystemTools::MoveFileIfDifferent(
+  const std::string& source, const std::string& destination)
 {
+  cmsys::Status res = {};
   if (FilesDiffer(source, destination)) {
     if (RenameFile(source, destination)) {
-      return;
+      return res;
     }
-    CopyFileAlways(source, destination);
+    res = CopyFileAlways(source, destination);
   }
   RemoveFile(source);
+  return res;
 }
 
 void cmSystemTools::Glob(const std::string& directory,
@@ -1600,18 +1616,58 @@ cm::optional<std::string> cmSystemTools::GetEnvVar(std::string const& var)
   return result;
 }
 
-std::vector<std::string> cmSystemTools::SplitEnvPath(std::string const& value)
+std::vector<std::string> cmSystemTools::GetEnvPathNormalized(
+  std::string const& var)
+{
+  std::vector<std::string> result;
+  if (cm::optional<std::string> env = cmSystemTools::GetEnvVar(var)) {
+    std::vector<std::string> p = cmSystemTools::SplitEnvPathNormalized(*env);
+    std::move(p.begin(), p.end(), std::back_inserter(result));
+  }
+  return result;
+}
+
+std::vector<std::string> cmSystemTools::SplitEnvPath(cm::string_view in)
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
   static cm::string_view sep = ";"_s;
 #else
   static cm::string_view sep = ":"_s;
 #endif
-  std::vector<std::string> paths = cmTokenize(value, sep);
-  for (std::string& p : paths) {
-    SystemTools::ConvertToUnixSlashes(p);
+  std::vector<std::string> paths;
+  cm::string_view::size_type e = 0;
+  for (;;) {
+    cm::string_view::size_type b = in.find_first_not_of(sep, e);
+    if (b == cm::string_view::npos) {
+      break;
+    }
+    e = in.find_first_of(sep, b);
+    if (e == cm::string_view::npos) {
+      paths.emplace_back(in.substr(b));
+      break;
+    }
+    paths.emplace_back(in.substr(b, e - b));
   }
   return paths;
+}
+
+std::vector<std::string> cmSystemTools::SplitEnvPathNormalized(
+  cm::string_view in)
+{
+  std::vector<std::string> paths = cmSystemTools::SplitEnvPath(in);
+  std::transform(paths.begin(), paths.end(), paths.begin(),
+                 cmSystemTools::ToNormalizedPathOnDisk);
+  return paths;
+}
+
+std::string cmSystemTools::ToNormalizedPathOnDisk(std::string p)
+{
+  p = cmSystemTools::CollapseFullPath(p);
+  cmSystemTools::ConvertToUnixSlashes(p);
+#ifdef _WIN32
+  p = cmSystemTools::GetActualCaseForPathCached(p);
+#endif
+  return p;
 }
 
 #ifndef CMAKE_BOOTSTRAP
@@ -1854,12 +1910,18 @@ bool cmSystemTools::IsPathToMacOSSharedLibrary(const std::string& path)
 
 bool cmSystemTools::CreateTar(const std::string& outFileName,
                               const std::vector<std::string>& files,
+                              const std::string& workingDirectory,
                               cmTarCompression compressType, bool verbose,
                               std::string const& mtime,
                               std::string const& format, int compressionLevel)
 {
 #if !defined(CMAKE_BOOTSTRAP)
-  std::string cwd = cmSystemTools::GetCurrentWorkingDirectory();
+  cmWorkingDirectory workdir(cmSystemTools::GetCurrentWorkingDirectory());
+  if (!workingDirectory.empty()) {
+    workdir.SetDirectory(workingDirectory);
+  }
+
+  const std::string cwd = cmSystemTools::GetCurrentWorkingDirectory();
   cmsys::ofstream fout(outFileName.c_str(), std::ios::out | std::ios::binary);
   if (!fout) {
     std::string e = cmStrCat("Cannot open output file \"", outFileName,
@@ -1945,7 +2007,7 @@ void list_item_verbose(FILE* out, struct archive_entry* entry)
 
   /* Use uname if it's present, else uid. */
   p = archive_entry_uname(entry);
-  if ((p == nullptr) || (*p == '\0')) {
+  if (!p || (*p == '\0')) {
     snprintf(tmp, sizeof(tmp), "%lu ",
              static_cast<unsigned long>(archive_entry_uid(entry)));
     p = tmp;
@@ -1957,7 +2019,7 @@ void list_item_verbose(FILE* out, struct archive_entry* entry)
   fprintf(out, "%-*s ", static_cast<int>(u_width), p);
   /* Use gname if it's present, else gid. */
   p = archive_entry_gname(entry);
-  if (p != nullptr && p[0] != '\0') {
+  if (p && p[0] != '\0') {
     fprintf(out, "%s", p);
     w = strlen(p);
   } else {
@@ -2102,7 +2164,7 @@ bool extract_tar(const std::string& outFileName,
   struct archive_entry* entry;
 
   struct archive* matching = archive_match_new();
-  if (matching == nullptr) {
+  if (!matching) {
     cmSystemTools::Error("Out of memory");
     return false;
   }
@@ -2138,15 +2200,14 @@ bool extract_tar(const std::string& outFileName,
 
     if (verbose) {
       if (extract) {
-        cmSystemTools::Stdout("x ");
-        cmSystemTools::Stdout(cm_archive_entry_pathname(entry));
+        cmSystemTools::Stdout(
+          cmStrCat("x ", cm_archive_entry_pathname(entry)));
       } else {
         list_item_verbose(stdout, entry);
       }
       cmSystemTools::Stdout("\n");
     } else if (!extract) {
-      cmSystemTools::Stdout(cm_archive_entry_pathname(entry));
-      cmSystemTools::Stdout("\n");
+      cmSystemTools::Stdout(cmStrCat(cm_archive_entry_pathname(entry), '\n'));
     }
     if (extract) {
       if (extractTimestamps == cmSystemTools::cmTarExtractTimestamps::Yes) {
@@ -2185,7 +2246,7 @@ bool extract_tar(const std::string& outFileName,
   }
 
   bool error_occured = false;
-  if (matching != nullptr) {
+  if (matching) {
     const char* p;
     int ar;
 
@@ -2720,7 +2781,7 @@ cm::optional<std::string> cmSystemTools::GetCMakeConfigDirectory()
 
 std::string cmSystemTools::GetCurrentWorkingDirectory()
 {
-  return cmSystemTools::CollapseFullPath(
+  return cmSystemTools::ToNormalizedPathOnDisk(
     cmsys::SystemTools::GetCurrentWorkingDirectory());
 }
 
@@ -3024,10 +3085,10 @@ static cm::optional<bool> ChangeRPathELF(std::string const& file,
         std::ostringstream e;
         /* clang-format off */
         e << "The current " << se_name << " is:\n"
-          << "  " << inRPath << "\n"
-          << "which does not contain:\n"
-          << "  " << oldRPath << "\n"
-          << "as was expected.";
+             "  " << inRPath << "\n"
+             "which does not contain:\n"
+             "  " << oldRPath << "\n"
+             "as was expected.";
         /* clang-format on */
         *emsg2 = e.str();
       }
@@ -3111,10 +3172,10 @@ static cm::optional<bool> ChangeRPathXCOFF(std::string const& file,
         std::ostringstream e;
         /* clang-format off */
         e << "The current RPATH is:\n"
-          << "  " << libPath << "\n"
-          << "which does not contain:\n"
-          << "  " << oldRPath << "\n"
-          << "as was expected.";
+             "  " << libPath << "\n"
+             "which does not contain:\n"
+             "  " << oldRPath << "\n"
+             "as was expected.";
         /* clang-format on */
         *emsg = e.str();
       }

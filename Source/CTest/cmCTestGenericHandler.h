@@ -4,7 +4,6 @@
 
 #include "cmConfigure.h" // IWYU pragma: keep
 
-#include <cstddef>
 #include <map>
 #include <string>
 #include <vector>
@@ -44,24 +43,13 @@ public:
   virtual int ProcessHandler() = 0;
 
   /**
-   * Process command line arguments that are applicable for the handler
-   */
-  virtual int ProcessCommandLineArguments(
-    const std::string& /*currentArg*/, size_t& /*idx*/,
-    const std::vector<std::string>& /*allArgs*/, bool& /*valid*/)
-  {
-    return 1;
-  }
-
-  /**
    * Initialize handler
    */
-  virtual void Initialize();
+  virtual void Initialize(cmCTest* ctest);
 
   /**
-   * Set the CTest instance
+   * Get the CTest instance
    */
-  void SetCTestInstance(cmCTest* ctest) { this->CTest = ctest; }
   cmCTest* GetCTestInstance() { return this->CTest; }
 
   /**

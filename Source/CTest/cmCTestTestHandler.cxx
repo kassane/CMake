@@ -8,7 +8,6 @@
 #include <cstddef> // IWYU pragma: keep
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <functional>
 #include <iomanip>
@@ -97,8 +96,7 @@ bool ReadSubdirectory(std::string fname, cmExecutionStatus& status)
   {
     cmWorkingDirectory workdir(fname);
     if (workdir.Failed()) {
-      status.SetError("Failed to change directory to " + fname + " : " +
-                      std::strerror(workdir.GetLastResult()));
+      status.SetError(workdir.GetError());
       return false;
     }
     const char* testFilename;
@@ -315,9 +313,9 @@ cmCTestTestHandler::cmCTestTestHandler()
   this->CustomLabelRegex.compile("<CTestLabel>(.*)</CTestLabel>");
 }
 
-void cmCTestTestHandler::Initialize()
+void cmCTestTestHandler::Initialize(cmCTest* ctest)
 {
-  this->Superclass::Initialize();
+  this->Superclass::Initialize(ctest);
 
   this->ElapsedTestingTime = cmDuration();
 
@@ -378,6 +376,33 @@ void cmCTestTestHandler::PopulateCustomVectors(cmMakefile* mf)
                    << *dval << std::endl);
     }
   }
+}
+
+void cmCTestTestHandler::SetCMakeVariables(cmMakefile& mf)
+{
+  mf.AddDefinition("CTEST_CUSTOM_PRE_TEST",
+                   cmList(this->CustomPreTest).to_string());
+  mf.AddDefinition("CTEST_CUSTOM_POST_TEST",
+                   cmList(this->CustomPostTest).to_string());
+  mf.AddDefinition("CTEST_CUSTOM_TESTS_IGNORE",
+                   cmList(this->CustomTestsIgnore).to_string());
+  mf.AddDefinition("CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE",
+                   std::to_string(this->CustomMaximumPassedTestOutputSize));
+  mf.AddDefinition("CTEST_CUSTOM_MAXIMUM_FAILED_TEST_OUTPUT_SIZE",
+                   std::to_string(this->CustomMaximumFailedTestOutputSize));
+  mf.AddDefinition("CTEST_CUSTOM_TEST_OUTPUT_TRUNCATION",
+                   [this]() -> cm::string_view {
+                     switch (this->TestOutputTruncation) {
+                       case cmCTestTypes::TruncationMode::Tail:
+                         return "tail"_s;
+                       case cmCTestTypes::TruncationMode::Middle:
+                         return "middle"_s;
+                       case cmCTestTypes::TruncationMode::Head:
+                         return "head"_s;
+                       default:
+                         return ""_s;
+                     }
+                   }());
 }
 
 int cmCTestTestHandler::PreProcessHandler()
@@ -702,13 +727,23 @@ void cmCTestTestHandler::LogFailedTests(const std::vector<std::string>& failed,
         if (this->GetTestStatus(ft) == "Not Run") {
           testColor = cmCTest::Color::YELLOW;
         }
+        std::string ft_name_and_status =
+          cmStrCat(ft.Name, " (", this->GetTestStatus(ft), ")");
+        std::string labels;
+        const cmCTestTestProperties& p = *ft.Properties;
+        if (!p.Labels.empty()) {
+          static size_t const maxLen = 50;
+          size_t const ns = ft_name_and_status.size() >= maxLen
+            ? 1
+            : maxLen - ft_name_and_status.size();
+          labels = cmStrCat(std::string(ns, ' '), cmJoin(p.Labels, " "));
+        }
         cmCTestLog(
           this->CTest, HANDLER_OUTPUT,
           "\t" << this->CTest->GetColorCode(testColor) << std::setw(3)
-               << ft.TestCount << " - " << ft.Name << " ("
-               << this->GetTestStatus(ft) << ")"
+               << ft.TestCount << " - " << ft_name_and_status
                << this->CTest->GetColorCode(cmCTest::Color::CLEAR_COLOR)
-               << std::endl);
+               << labels << std::endl);
       }
     }
   }
@@ -1751,7 +1786,7 @@ std::string cmCTestTestHandler::FindExecutable(
   for (unsigned int ai = 0; ai < attempted.size() && fullPath.empty(); ++ai) {
     // first check without exe extension
     if (cmSystemTools::FileExists(attempted[ai], true)) {
-      fullPath = cmSystemTools::CollapseFullPath(attempted[ai]);
+      fullPath = cmSystemTools::ToNormalizedPathOnDisk(attempted[ai]);
       resultingConfig = attemptedConfigs[ai];
     }
     // then try with the exe extension
@@ -1760,7 +1795,7 @@ std::string cmCTestTestHandler::FindExecutable(
       tempPath =
         cmStrCat(attempted[ai], cmSystemTools::GetExecutableExtension());
       if (cmSystemTools::FileExists(tempPath, true)) {
-        fullPath = cmSystemTools::CollapseFullPath(tempPath);
+        fullPath = cmSystemTools::ToNormalizedPathOnDisk(tempPath);
         resultingConfig = attemptedConfigs[ai];
       } else {
         failed.push_back(tempPath);

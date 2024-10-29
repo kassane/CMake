@@ -65,7 +65,7 @@ public:
    */
   void PopulateCustomVectors(cmMakefile* mf) override;
 
-  //! Control the use of the regular expresisons, call these methods to turn
+  //! Control the use of the regular expressions, call these methods to turn
   /// them on
   void UseIncludeRegExp();
   void UseExcludeRegExp();
@@ -107,7 +107,7 @@ public:
    */
   bool SetDirectoryProperties(const std::vector<std::string>& args);
 
-  void Initialize() override;
+  void Initialize(cmCTest* ctest) override;
 
   struct cmCTestTestResourceRequirement
   {
@@ -227,6 +227,11 @@ public:
 
   // Support for writing test results in JUnit XML format.
   void SetJUnitXMLFileName(const std::string& id);
+
+  /**
+   * Set CMake variables from CTest Options
+   */
+  void SetCMakeVariables(cmMakefile& mf);
 
 protected:
   using SetOfTests =

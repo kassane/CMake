@@ -500,6 +500,7 @@ void cmLocalGenerator::GenerateInstallRules()
     toplevel_install = 1;
   }
   file += "/cmake_install.cmake";
+  this->GetGlobalGenerator()->AddInstallScript(file);
   cmGeneratedFileStream fout(file);
   fout.SetCopyIfDifferent(true);
 
@@ -712,32 +713,40 @@ void cmLocalGenerator::GenerateInstallRules()
       break;
   }
 
-  // Record the install manifest.
-  if (toplevel_install) {
-    /* clang-format off */
+  /* clang-format off */
+
     fout <<
-      "if(CMAKE_INSTALL_COMPONENT)\n"
-      "  if(CMAKE_INSTALL_COMPONENT MATCHES \"^[a-zA-Z0-9_.+-]+$\")\n"
-      "    set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
-      "${CMAKE_INSTALL_COMPONENT}.txt\")\n"
-      "  else()\n"
-      "    string(MD5 CMAKE_INST_COMP_HASH \"${CMAKE_INSTALL_COMPONENT}\")\n"
-      "    set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
-      "${CMAKE_INST_COMP_HASH}.txt\")\n"
-      "    unset(CMAKE_INST_COMP_HASH)\n"
-      "  endif()\n"
-      "else()\n"
-      "  set(CMAKE_INSTALL_MANIFEST \"install_manifest.txt\")\n"
-      "endif()\n"
-      "\n"
-      "if(NOT CMAKE_INSTALL_LOCAL_ONLY)\n"
-      "  string(REPLACE \";\" \"\\n\" CMAKE_INSTALL_MANIFEST_CONTENT\n"
+      "string(REPLACE \";\" \"\\n\" CMAKE_INSTALL_MANIFEST_CONTENT\n"
       "       \"${CMAKE_INSTALL_MANIFEST_FILES}\")\n"
-      "  file(WRITE \"" << homedir << "/${CMAKE_INSTALL_MANIFEST}\"\n"
+      "if(CMAKE_INSTALL_LOCAL_ONLY)\n"
+      "  file(WRITE \"" <<
+      this->StateSnapshot.GetDirectory().GetCurrentBinary() <<
+      "/install_local_manifest.txt\"\n"
       "     \"${CMAKE_INSTALL_MANIFEST_CONTENT}\")\n"
       "endif()\n";
-    /* clang-format on */
-  }
+
+    if (toplevel_install) {
+      fout <<
+        "if(CMAKE_INSTALL_COMPONENT)\n"
+        "  if(CMAKE_INSTALL_COMPONENT MATCHES \"^[a-zA-Z0-9_.+-]+$\")\n"
+        "    set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
+        "${CMAKE_INSTALL_COMPONENT}.txt\")\n"
+        "  else()\n"
+        "    string(MD5 CMAKE_INST_COMP_HASH \"${CMAKE_INSTALL_COMPONENT}\")\n"
+        "    set(CMAKE_INSTALL_MANIFEST \"install_manifest_"
+        "${CMAKE_INST_COMP_HASH}.txt\")\n"
+        "    unset(CMAKE_INST_COMP_HASH)\n"
+        "  endif()\n"
+        "else()\n"
+        "  set(CMAKE_INSTALL_MANIFEST \"install_manifest.txt\")\n"
+        "endif()\n"
+        "\n"
+        "if(NOT CMAKE_INSTALL_LOCAL_ONLY)\n"
+        "  file(WRITE \"" << homedir << "/${CMAKE_INSTALL_MANIFEST}\"\n"
+        "     \"${CMAKE_INSTALL_MANIFEST_CONTENT}\")\n"
+        "endif()\n";
+    }
+  /* clang-format on */
 }
 
 void cmLocalGenerator::AddGeneratorTarget(
@@ -902,7 +911,7 @@ std::string cmLocalGenerator::GetIncludeFlags(
     sysIncludeFlag = this->Makefile->GetDefinition(
       cmStrCat("CMAKE_INCLUDE_SYSTEM_FLAG_", lang));
     sysIncludeFlagWarning = this->Makefile->GetDefinition(
-      cmStrCat("_CMAKE_INCLUDE_SYSTEM_FLAG_", lang, "_WARNING"));
+      cmStrCat("CMAKE_INCLUDE_SYSTEM_FLAG_", lang, "_WARNING"));
   }
 
   cmValue fwSearchFlag = this->Makefile->GetDefinition(
@@ -1888,6 +1897,10 @@ void cmLocalGenerator::OutputLinkLibraries(
       this->Makefile->GetRequiredDefinition("CMAKE_LIBRARY_PATH_TERMINATOR");
   }
 
+  // Add standard link directories for this language
+  std::string stdLinkDirString = this->Makefile->GetSafeDefinition(
+    cmStrCat("CMAKE_", cli.GetLinkLanguage(), "_STANDARD_LINK_DIRECTORIES"));
+
   // Add standard libraries for this language.
   std::string stdLibString = this->Makefile->GetSafeDefinition(
     cmStrCat("CMAKE_", cli.GetLinkLanguage(), "_STANDARD_LIBRARIES"));
@@ -1898,7 +1911,7 @@ void cmLocalGenerator::OutputLinkLibraries(
 
   frameworkPath = linkLineComputer->ComputeFrameworkPath(cli, fwSearchFlag);
   linkLineComputer->ComputeLinkPath(cli, libPathFlag, libPathTerminator,
-                                    linkPath);
+                                    stdLinkDirString, linkPath);
   linkLineComputer->ComputeLinkLibraries(cli, stdLibString, linkLibraries);
 }
 
@@ -2367,7 +2380,7 @@ bool cmLocalGenerator::GetRealDependency(const std::string& inName,
     dep = cmStrCat(this->GetCurrentBinaryDirectory(), '/', inName);
   }
 
-  dep = cmSystemTools::CollapseFullPath(dep, this->GetBinaryDirectory());
+  dep = cmSystemTools::CollapseFullPath(dep);
 
   return true;
 }
@@ -3074,7 +3087,8 @@ inline void RegisterUnitySources(cmGeneratorTarget* target, cmSourceFile* sf,
 cmLocalGenerator::UnitySource cmLocalGenerator::WriteUnitySource(
   cmGeneratorTarget* target, std::vector<std::string> const& configs,
   cmRange<std::vector<UnityBatchedSource>::const_iterator> sources,
-  cmValue beforeInclude, cmValue afterInclude, std::string filename) const
+  cmValue beforeInclude, cmValue afterInclude, std::string filename,
+  std::string const& unityFileDirectory, UnityPathMode pathMode) const
 {
   cmValue uniqueIdName = target->GetProperty("UNITY_BUILD_UNIQUE_ID");
   cmGeneratedFileStream file(
@@ -3097,7 +3111,8 @@ cmLocalGenerator::UnitySource cmLocalGenerator::WriteUnitySource(
     }
     RegisterUnitySources(target, ubs.Source, filename);
     WriteUnitySourceInclude(file, cond, ubs.Source->ResolveFullPath(),
-                            beforeInclude, afterInclude, uniqueIdName);
+                            beforeInclude, afterInclude, uniqueIdName,
+                            pathMode, unityFileDirectory);
   }
 
   return UnitySource(std::move(filename), perConfig);
@@ -3106,28 +3121,35 @@ cmLocalGenerator::UnitySource cmLocalGenerator::WriteUnitySource(
 void cmLocalGenerator::WriteUnitySourceInclude(
   std::ostream& unity_file, cm::optional<std::string> const& cond,
   std::string const& sf_full_path, cmValue beforeInclude, cmValue afterInclude,
-  cmValue uniqueIdName) const
+  cmValue uniqueIdName, UnityPathMode pathMode,
+  std::string const& unityFileDirectory) const
 {
   if (cond) {
     unity_file << "#if " << *cond << "\n";
   }
 
+  std::string pathToHash;
+  std::string relocatableIncludePath;
+  auto PathEqOrSubDir = [](std::string const& a, std::string const& b) {
+    return (cmSystemTools::ComparePath(a, b) ||
+            cmSystemTools::IsSubDirectory(a, b));
+  };
+  const auto path = cmSystemTools::GetFilenamePath(sf_full_path);
+  if (PathEqOrSubDir(path, this->GetBinaryDirectory())) {
+    relocatableIncludePath =
+      cmSystemTools::RelativePath(unityFileDirectory, sf_full_path);
+    pathToHash = "BLD_" +
+      cmSystemTools::RelativePath(this->GetBinaryDirectory(), sf_full_path);
+  } else if (PathEqOrSubDir(path, this->GetSourceDirectory())) {
+    relocatableIncludePath =
+      cmSystemTools::RelativePath(this->GetSourceDirectory(), sf_full_path);
+    pathToHash = "SRC_" + relocatableIncludePath;
+  } else {
+    relocatableIncludePath = sf_full_path;
+    pathToHash = "ABS_" + sf_full_path;
+  }
+
   if (cmNonempty(uniqueIdName)) {
-    std::string pathToHash;
-    auto PathEqOrSubDir = [](std::string const& a, std::string const& b) {
-      return (cmSystemTools::ComparePath(a, b) ||
-              cmSystemTools::IsSubDirectory(a, b));
-    };
-    const auto path = cmSystemTools::GetFilenamePath(sf_full_path);
-    if (PathEqOrSubDir(path, this->GetBinaryDirectory())) {
-      pathToHash = "BLD_" +
-        cmSystemTools::RelativePath(this->GetBinaryDirectory(), sf_full_path);
-    } else if (PathEqOrSubDir(path, this->GetSourceDirectory())) {
-      pathToHash = "SRC_" +
-        cmSystemTools::RelativePath(this->GetSourceDirectory(), sf_full_path);
-    } else {
-      pathToHash = "ABS_" + sf_full_path;
-    }
     cmCryptoHash hasher(cmCryptoHash::AlgoMD5);
     unity_file << "/* " << pathToHash << " */\n"
                << "#undef " << *uniqueIdName << "\n"
@@ -3143,7 +3165,11 @@ void cmLocalGenerator::WriteUnitySourceInclude(
   unity_file
     << "/* NOLINTNEXTLINE(bugprone-suspicious-include,misc-include-cleaner) "
        "*/\n";
-  unity_file << "#include \"" << sf_full_path << "\"\n";
+  if (pathMode == UnityPathMode::Relative) {
+    unity_file << "#include \"" << relocatableIncludePath << "\"\n";
+  } else {
+    unity_file << "#include \"" << sf_full_path << "\"\n";
+  }
 
   if (afterInclude) {
     unity_file << *afterInclude << "\n";
@@ -3154,13 +3180,32 @@ void cmLocalGenerator::WriteUnitySourceInclude(
   unity_file << "\n";
 }
 
+namespace {
+std::string unity_file_extension(std::string const& lang)
+{
+  std::string extension;
+  if (lang == "C") {
+    extension = "_c.c";
+  } else if (lang == "CXX") {
+    extension = "_cxx.cxx";
+  } else if (lang == "CUDA") {
+    extension = "_cu.cu";
+  } else if (lang == "OBJC") {
+    extension = "_m.m";
+  } else if (lang == "OBJCXX") {
+    extension = "_mm.mm";
+  }
+  return extension;
+}
+}
+
 std::vector<cmLocalGenerator::UnitySource>
 cmLocalGenerator::AddUnityFilesModeAuto(
   cmGeneratorTarget* target, std::string const& lang,
   std::vector<std::string> const& configs,
   std::vector<UnityBatchedSource> const& filtered_sources,
   cmValue beforeInclude, cmValue afterInclude,
-  std::string const& filename_base, size_t batchSize)
+  std::string const& filename_base, UnityPathMode pathMode, size_t batchSize)
 {
   if (batchSize == 0) {
     batchSize = filtered_sources.size();
@@ -3172,22 +3217,13 @@ cmLocalGenerator::AddUnityFilesModeAuto(
 
     chunk = std::min(itemsLeft, batchSize);
 
-    std::string extension;
-    if (lang == "C") {
-      extension = "_c.c";
-    } else if (lang == "CXX") {
-      extension = "_cxx.cxx";
-    } else if (lang == "OBJC") {
-      extension = "_m.m";
-    } else if (lang == "OBJCXX") {
-      extension = "_mm.mm";
-    }
-    std::string filename = cmStrCat(filename_base, "unity_", batch, extension);
+    std::string filename =
+      cmStrCat(filename_base, "unity_", batch, unity_file_extension(lang));
     auto const begin = filtered_sources.begin() + batch * batchSize;
     auto const end = begin + chunk;
     unity_files.emplace_back(this->WriteUnitySource(
       target, configs, cmMakeRange(begin, end), beforeInclude, afterInclude,
-      std::move(filename)));
+      std::move(filename), filename_base, pathMode));
   }
   return unity_files;
 }
@@ -3198,7 +3234,7 @@ cmLocalGenerator::AddUnityFilesModeGroup(
   std::vector<std::string> const& configs,
   std::vector<UnityBatchedSource> const& filtered_sources,
   cmValue beforeInclude, cmValue afterInclude,
-  std::string const& filename_base)
+  std::string const& filename_base, UnityPathMode pathMode)
 {
   std::vector<UnitySource> unity_files;
 
@@ -3220,11 +3256,11 @@ cmLocalGenerator::AddUnityFilesModeGroup(
 
   for (auto const& item : explicit_mapping) {
     auto const& name = item.first;
-    std::string filename = cmStrCat(filename_base, "unity_", name,
-                                    (lang == "C") ? "_c.c" : "_cxx.cxx");
+    std::string filename =
+      cmStrCat(filename_base, "unity_", name, unity_file_extension(lang));
     unity_files.emplace_back(this->WriteUnitySource(
       target, configs, cmMakeRange(item.second), beforeInclude, afterInclude,
-      std::move(filename)));
+      std::move(filename), filename_base, pathMode));
   }
 
   return unity_files;
@@ -3282,8 +3318,11 @@ void cmLocalGenerator::AddUnityBuild(cmGeneratorTarget* target)
     target->GetProperty("UNITY_BUILD_CODE_BEFORE_INCLUDE");
   cmValue afterInclude = target->GetProperty("UNITY_BUILD_CODE_AFTER_INCLUDE");
   cmValue unityMode = target->GetProperty("UNITY_BUILD_MODE");
+  UnityPathMode pathMode = target->GetPropertyAsBool("UNITY_BUILD_RELOCATABLE")
+    ? UnityPathMode::Relative
+    : UnityPathMode::Absolute;
 
-  for (std::string lang : { "C", "CXX", "OBJC", "OBJCXX" }) {
+  for (std::string lang : { "C", "CXX", "OBJC", "OBJCXX", "CUDA" }) {
     std::vector<UnityBatchedSource> filtered_sources;
     std::copy_if(unitySources.begin(), unitySources.end(),
                  std::back_inserter(filtered_sources),
@@ -3302,11 +3341,11 @@ void cmLocalGenerator::AddUnityBuild(cmGeneratorTarget* target)
     if (!unityMode || *unityMode == "BATCH") {
       unity_files = AddUnityFilesModeAuto(
         target, lang, configs, filtered_sources, beforeInclude, afterInclude,
-        filename_base, unityBatchSize);
+        filename_base, pathMode, unityBatchSize);
     } else if (unityMode && *unityMode == "GROUP") {
-      unity_files =
-        AddUnityFilesModeGroup(target, lang, configs, filtered_sources,
-                               beforeInclude, afterInclude, filename_base);
+      unity_files = AddUnityFilesModeGroup(
+        target, lang, configs, filtered_sources, beforeInclude, afterInclude,
+        filename_base, pathMode);
     } else {
       // unity mode is set to an unsupported value
       std::string e("Invalid UNITY_BUILD_MODE value of " + *unityMode +
@@ -3324,6 +3363,11 @@ void cmLocalGenerator::AddUnityBuild(cmGeneratorTarget* target)
       if (file.PerConfig) {
         unity->SetProperty("COMPILE_DEFINITIONS",
                            "CMAKE_UNITY_CONFIG_$<UPPER_CASE:$<CONFIG>>");
+      }
+
+      if (pathMode == UnityPathMode::Relative) {
+        unity->AppendProperty("INCLUDE_DIRECTORIES",
+                              this->GetSourceDirectory(), false);
       }
     }
   }
@@ -3424,7 +3468,7 @@ void cmLocalGenerator::AppendPositionIndependentLinkerFlags(
   }
 
   const char* PICValue = target->GetLinkPIEProperty(config);
-  if (PICValue == nullptr) {
+  if (!PICValue) {
     // POSITION_INDEPENDENT_CODE is not set
     return;
   }
@@ -3552,7 +3596,7 @@ void cmLocalGenerator::AppendCompileOptions(
   std::string& options, const std::vector<std::string>& options_vec,
   const char* regex) const
 {
-  if (regex != nullptr) {
+  if (regex) {
     // Filter flags upon specified reges.
     cmsys::RegularExpression r(regex);
 
@@ -3572,7 +3616,7 @@ void cmLocalGenerator::AppendCompileOptions(
   std::vector<BT<std::string>>& options,
   const std::vector<BT<std::string>>& options_vec, const char* regex) const
 {
-  if (regex != nullptr) {
+  if (regex) {
     // Filter flags upon specified regular expressions.
     cmsys::RegularExpression r(regex);
 

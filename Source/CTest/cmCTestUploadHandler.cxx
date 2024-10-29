@@ -11,14 +11,11 @@
 #include "cmVersion.h"
 #include "cmXMLWriter.h"
 
-cmCTestUploadHandler::cmCTestUploadHandler()
-{
-  this->Initialize();
-}
+cmCTestUploadHandler::cmCTestUploadHandler() = default;
 
-void cmCTestUploadHandler::Initialize()
+void cmCTestUploadHandler::Initialize(cmCTest* ctest)
 {
-  this->Superclass::Initialize();
+  this->Superclass::Initialize(ctest);
   this->Files.clear();
 }
 
@@ -49,7 +46,7 @@ int cmCTestUploadHandler::ProcessHandler()
   xml.Attribute("BuildName", buildname);
   xml.Attribute("BuildStamp",
                 this->CTest->GetCurrentTag() + "-" +
-                  this->CTest->GetTestModelString());
+                  this->CTest->GetTestGroupString());
   xml.Attribute("Name", this->CTest->GetCTestConfiguration("Site"));
   xml.Attribute("Generator",
                 std::string("ctest-") + cmVersion::GetCMakeVersion());

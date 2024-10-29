@@ -298,6 +298,9 @@ public:
     this->GeneratorToolsetSet = true;
   }
 
+  //! Set the name of the graphviz file.
+  void SetGraphVizFile(std::string const& ts) { this->GraphVizFile = ts; }
+
   bool IsAKnownSourceExtension(cm::string_view ext) const
   {
     return this->CLikeSourceFileExtensions.Test(ext) ||
